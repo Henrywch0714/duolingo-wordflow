@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordflow-v2";
+const CACHE_NAME = "wordflow-v3";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -22,10 +22,11 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
   event.respondWith(
     fetch(event.request).then((response) => {
-      if (response.ok && new URL(event.request.url).origin === self.location.origin) {
+      if (response.ok) {
         const copy = response.clone();
         event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)));
       }

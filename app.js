@@ -280,10 +280,12 @@
         syncRevision = 0;
         syncConflict = false;
         await pushSync();
+      } else if (syncRevision === record.revision) {
+        if (!hasStudyData(state)) await useCloud(record);
+        else if (syncDirty) await pushSync();
+        else syncStatus(`已连接云端 · 版本 ${syncRevision}`);
       } else if (!hasStudyData(state)) {
         await useCloud(record);
-      } else if (syncRevision === record.revision && !syncDirty) {
-        syncStatus(`已连接云端 · 版本 ${syncRevision}`);
       } else if (syncRevision > 0 && !syncDirty) {
         await useCloud(record);
       } else {
@@ -294,7 +296,7 @@
         syncKey = "";
         syncStatus(error.status === 401 ? "口令错误，请检查后重试。" : "云端暂不可用，请稍后重试。", false);
       } else {
-        syncStatus("云端暂不可用，本机进度仍可使用。");
+        syncStatus(error.status === 401 ? "同步口令已失效，请断开后重新连接。" : "云端暂不可用，本机进度仍可使用。");
       }
     }
   }
@@ -348,12 +350,12 @@
 
   function newWords() {
     const answered = getTodayAnswers();
-    return words.filter((item) => {
+    return state.deckOrder.map((word) => wordMap.get(word)).filter((item) => {
       if (state.progress[item.word] || answered[item.word]) return false;
       if (state.difficultyFilter !== "全部" && item.difficulty !== state.difficultyFilter) return false;
       if (state.polarityFilter !== "全部" && item.polarity !== state.polarityFilter) return false;
       return true;
-    }).sort((a, b) => deckIndex.get(a.word) - deckIndex.get(b.word));
+    });
   }
 
   function pickNext() {
