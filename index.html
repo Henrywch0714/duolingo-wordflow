@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f5f2e9" />
+    <meta name="description" content="个人多邻国核心词单词卡，按间隔复习计划背词。" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>词间 · 多邻国单词卡</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+          <div>
+            <strong>词间</strong>
+            <small>WORDFLOW</small>
+          </div>
+        </div>
+        <span class="device-pill"><span class="status-dot"></span> 进度存于此设备</span>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow" id="today-label">TODAY'S PRACTICE</p>
+            <h1 id="hero-title">每天记住一点，<br /><em>就会走得更远。</em></h1>
+            <p>先复习，再学新词。昨天没完成的，今天接着来。</p>
+          </div>
+          <div class="hero-decoration" aria-hidden="true">a<span>·</span>z</div>
+        </section>
+
+        <section class="overview" aria-label="学习进度">
+          <div class="overview-top">
+            <div>
+              <span class="section-kicker">今日进度</span>
+              <div class="progress-number"><strong id="done-count">0</strong><span> / <span id="goal-display">20</span> 张</span></div>
+            </div>
+            <span class="progress-percent" id="progress-percent">0%</span>
+          </div>
+          <div class="progress-track" role="progressbar" aria-label="今日完成进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track"><div id="progress-fill"></div></div>
+          <div class="metric-row">
+            <div><strong id="due-count">0</strong><span>待复习</span></div>
+            <div><strong id="new-count">0</strong><span>未学新词</span></div>
+            <div><strong id="wrong-count">0</strong><span>错题本</span></div>
+          </div>
+        </section>
+
+        <nav class="tabs" aria-label="学习页面">
+          <button class="tab active" type="button" data-tab="today" aria-current="page">今日单词</button>
+          <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
+          <button class="tab" type="button" data-tab="settings">设置与备份</button>
+        </nav>
+
+        <section class="panel active" id="today-panel">
+          <div class="panel-intro">
+            <div>
+              <span class="section-kicker">DAILY DECK</span>
+              <h2>今天，从这一张开始</h2>
+            </div>
+            <span class="queue-note" id="queue-note">准备中</span>
+          </div>
+
+          <div class="filter-bar">
+            <label>新词难度
+              <select id="difficulty-filter">
+                <option value="全部">全部</option>
+                <option value="易">易</option>
+                <option value="中">中</option>
+                <option value="难">难</option>
+              </select>
+            </label>
+            <label>新词倾向
+              <select id="polarity-filter">
+                <option value="全部">全部</option>
+                <option value="正向">正向</option>
+                <option value="负面">负面</option>
+                <option value="中性">中性</option>
+              </select>
+            </label>
+          </div>
+          <p class="filter-hint">筛选只影响新词；到期复习词始终优先安排。</p>
+
+          <div class="flashcard-wrap" id="today-card-wrap">
+            <article class="flashcard" id="today-card">
+              <div class="card-top">
+                <span class="card-kind" id="card-kind">新词</span>
+                <span class="card-index" id="card-index">01 / 20</span>
+              </div>
+              <div class="card-center">
+                <span class="card-prompt" id="card-prompt">先看英文，再选择</span>
+                <div class="word-line">
+                  <h3 id="card-word">—</h3>
+                  <button class="sound-button" id="speak-button" type="button" aria-label="朗读单词" title="朗读单词">♫</button>
+                </div>
+                <div class="word-tags"><span id="card-difficulty">易</span><span id="card-polarity">中性</span></div>
+                <div class="translation" id="translation" hidden>
+                  <span>中文释义</span>
+                  <p id="card-gloss"></p>
+                </div>
+              </div>
+              <div class="card-bottom">
+                <span class="card-swipe-hint" id="card-hint">想好了吗？按下你的判断。</span>
+                <span class="card-symbol" aria-hidden="true">↗</span>
+              </div>
+            </article>
+            <div class="answer-actions" id="answer-actions">
+              <button class="answer-button unknown" type="button" id="unknown-button"><span>×</span> 不认识</button>
+              <button class="answer-button known" type="button" id="known-button"><span>✓</span> 认识</button>
+            </div>
+            <div class="reveal-actions" id="reveal-actions" hidden>
+              <button class="undo-button" type="button" id="undo-button">撤销判断</button>
+              <button class="next-button" type="button" id="next-button">下一张 <span>→</span></button>
+            </div>
+          </div>
+          <div class="empty-state" id="today-empty" hidden>
+            <div class="empty-glyph" aria-hidden="true">✦</div>
+            <h3 id="today-empty-title">今天完成啦</h3>
+            <p id="today-empty-text">你已完成今日计划。明天继续，记忆会慢慢变得牢固。</p>
+          </div>
+        </section>
+
+        <section class="panel" id="mistakes-panel">
+          <div class="panel-intro">
+            <div>
+              <span class="section-kicker">SECOND CHANCE</span>
+              <h2>错题本</h2>
+            </div>
+            <span class="queue-note" id="mistake-summary">0 个单词</span>
+          </div>
+          <p class="panel-description">“不认识”会累计一次。这里保留所有曾经答错的词，方便反复巩固。</p>
+          <div class="mistake-tools">
+            <input id="mistake-search" type="search" placeholder="搜索单词或中文释义" aria-label="搜索错题" />
+            <button id="practice-mistakes" type="button">开始错题复习</button>
+          </div>
+          <div id="mistake-practice" class="mistake-practice" hidden>
+            <div class="practice-head"><strong>错题专项</strong><button id="exit-practice" type="button">结束练习</button></div>
+            <div class="practice-word" id="practice-word"></div>
+            <p class="practice-gloss" id="practice-gloss" hidden></p>
+            <div class="practice-actions" id="practice-actions">
+              <button type="button" id="practice-unknown">不认识</button>
+              <button type="button" id="practice-known">认识</button>
+            </div>
+            <button class="practice-next" id="practice-next" type="button" hidden>下一张 →</button>
+          </div>
+          <div class="mistake-list" id="mistake-list"></div>
+          <p class="list-empty" id="mistake-empty" hidden>错题本还是空的，继续保持。</p>
+        </section>
+
+        <section class="panel" id="settings-panel">
+          <div class="panel-intro">
+            <div>
+              <span class="section-kicker">MAKE IT YOURS</span>
+              <h2>你的节奏，你来决定</h2>
+            </div>
+          </div>
+          <div class="setting-card">
+            <div><h3>每日背词数量</h3><p>包含逾期、到期和新词；未完成的自动留到下一天。</p></div>
+            <form id="goal-form" class="goal-form">
+              <input id="goal-input" type="number" min="1" max="200" inputmode="numeric" aria-label="每日背词数量" required />
+              <span>张 / 天</span>
+              <button type="submit">保存</button>
+            </form>
+          </div>
+          <div class="setting-card">
+            <div><h3>复习间隔</h3><p>答对后依次安排在 1、2、4、7、15、30 天后；答错则从短间隔重新开始。</p></div>
+            <div class="interval-row"><span>1 天</span><span>2 天</span><span>4 天</span><span>7 天</span><span>15 天</span><span>30 天</span></div>
+          </div>
+          <div class="setting-card plan-card">
+            <div><h3>未来 7 天复习预览</h3><p>今天包含逾期词；实际每日安排仍以你设置的数量为准。</p></div>
+            <div class="plan-list" id="plan-list" aria-label="未来七天到期复习词数量"></div>
+          </div>
+          <div class="setting-card">
+            <div><h3>进度备份</h3><p>进度只保存在这台设备。定期导出备份，换设备时可以导入。</p></div>
+            <div class="backup-actions">
+              <button type="button" id="export-button">导出进度</button>
+              <label class="import-button">导入进度<input id="import-input" type="file" accept=".json,application/json" /></label>
+            </div>
+          </div>
+          <p class="settings-footnote">词库共 3590 词。建议先在 iPhone Safari 中添加到主屏幕，再开始背词；Safari 页面与主屏幕应用的进度可能不共用。间隔安排是学习辅助规则。</p>
+        </section>
+      </main>
+
+      <footer>词间 · 每一个熟悉的词，都来自一次认真重逢。</footer>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
