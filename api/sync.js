@@ -1,35 +1,7 @@
-const { createHash, timingSafeEqual } = require("node:crypto");
-const { MongoClient } = require("mongodb");
-
-const ORIGIN = "https://henrywch0714.github.io";
-let clientPromise;
+const { getSession, records, sameOrigin } = require("./_server");
 
 function send(res, status, data) {
   res.status(status).json(data);
-}
-
-function authorized(value) {
-  const expected = process.env.SYNC_KEY_SHA256;
-  if (!expected || !/^[a-f0-9]{64}$/i.test(expected)) return false;
-  const key = /^Bearer (.+)$/.exec(value || "")?.[1];
-  if (!key) return false;
-  const actual = createHash("sha256").update(key).digest();
-  return timingSafeEqual(actual, Buffer.from(expected, "hex"));
-}
-
-async function collection() {
-  if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is not configured");
-  if (!clientPromise) {
-    clientPromise = new MongoClient(process.env.MONGODB_URI, {
-      maxPoolSize: 5,
-      serverSelectionTimeoutMS: 8000
-    }).connect().catch((error) => {
-      clientPromise = null;
-      throw error;
-    });
-  }
-  const client = await clientPromise;
-  return client.db("wordflow").collection("progress");
 }
 
 function validState(value) {
@@ -42,20 +14,16 @@ function validState(value) {
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
-  if (req.headers.origin === ORIGIN) {
-    res.setHeader("Access-Control-Allow-Origin", ORIGIN);
-    res.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    res.setHeader("Vary", "Origin");
-  }
-  if (req.method === "OPTIONS") return res.status(204).end();
   if (!["GET", "PUT"].includes(req.method)) return send(res, 405, { error: "method_not_allowed" });
-  if (!authorized(req.headers.authorization)) return send(res, 401, { error: "invalid_sync_key" });
+  if (req.method === "PUT" && !sameOrigin(req)) return send(res, 403, { error: "invalid_origin" });
 
   try {
-    const docs = await collection();
+    const docs = await records();
+    const user = await getSession(req, docs);
+    if (!user) return send(res, 401, { error: "login_required" });
+    const id = `progress:${user.id}`;
     if (req.method === "GET") {
-      const record = await docs.findOne({ _id: "primary" }, { projection: { state: 1, revision: 1, _id: 0 } });
+      const record = await docs.findOne({ _id: id }, { projection: { state: 1, revision: 1, _id: 0 } });
       return send(res, 200, record || { revision: 0, state: null });
     }
 
@@ -68,7 +36,7 @@ module.exports = async function handler(req, res) {
     }
     if (revision === 0) {
       try {
-        await docs.insertOne({ _id: "primary", revision: 1, state, updatedAt: new Date() });
+        await docs.insertOne({ _id: id, revision: 1, state, updatedAt: new Date() });
         return send(res, 200, { revision: 1 });
       } catch (error) {
         if (error.code === 11000) return send(res, 409, { error: "revision_conflict" });
@@ -76,7 +44,7 @@ module.exports = async function handler(req, res) {
       }
     }
     const result = await docs.updateOne(
-      { _id: "primary", revision },
+      { _id: id, revision },
       { $set: { state, revision: revision + 1, updatedAt: new Date() } }
     );
     if (!result.matchedCount) return send(res, 409, { error: "revision_conflict" });
