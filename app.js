@@ -41,6 +41,7 @@
   let syncTimer = null;
   let pendingCloud = null;
   let applyingCloud = false;
+  let authGeneration = 0;
 
   function userKey(base) {
     return `${base}:${authUser.id}`;
@@ -199,14 +200,16 @@
   }
 
   async function useCloud(record) {
+    const generation = authGeneration;
     applyingCloud = true;
     try {
       state = normalizeState(record.state);
       ensureDeckOrder();
       await saveState();
     } finally {
-      applyingCloud = false;
+      if (generation === authGeneration) applyingCloud = false;
     }
+    if (generation !== authGeneration) return;
     syncRevision = record.revision;
     localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
     localStorage.removeItem(userKey(SYNC_DIRTY_STORE));
@@ -228,12 +231,14 @@
 
   async function pushSync() {
     if (!authUser || syncBusy || syncConflict) return;
+    const generation = authGeneration;
     syncBusy = true;
     let saved = false;
     syncStatus("正在保存到云端…");
     try {
       const snapshot = JSON.stringify(state);
       const result = await syncRequest("PUT", { revision: syncRevision, state: JSON.parse(snapshot) });
+      if (generation !== authGeneration) return;
       saved = true;
       syncRevision = result.revision;
       localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
@@ -243,16 +248,25 @@
       }
       syncStatus(`已同步到云端 · 版本 ${syncRevision}`);
     } catch (error) {
+      if (generation !== authGeneration) return;
       if (error.status === 409) {
-        try { showSyncChoice(await syncRequest("GET")); }
-        catch { syncStatus("云端版本发生冲突，稍后点“立即同步”重试。"); }
+        try {
+          const record = await syncRequest("GET");
+          if (generation !== authGeneration) return;
+          showSyncChoice(record);
+        }
+        catch {
+          if (generation === authGeneration) syncStatus("云端版本发生冲突，稍后点“立即同步”重试。");
+        }
       } else {
         if (error.status === 401) showAuth("登录已过期，请重新登录。");
         else syncStatus("云端暂不可用，本机进度已保存；稍后点“立即同步”重试。");
       }
     } finally {
-      syncBusy = false;
-      if (saved && syncDirty && !syncConflict) queueSync(700);
+      if (generation === authGeneration) {
+        syncBusy = false;
+        if (saved && syncDirty && !syncConflict) queueSync(700);
+      }
     }
   }
 
@@ -263,9 +277,11 @@
 
   async function connectSync() {
     if (!authUser) return;
+    const generation = authGeneration;
     syncStatus("正在连接云端…");
     try {
       const record = await syncRequest("GET");
+      if (generation !== authGeneration) return;
       if (!record.state) {
         syncRevision = 0;
         syncConflict = false;
@@ -282,6 +298,7 @@
         showSyncChoice(record);
       }
     } catch (error) {
+      if (generation !== authGeneration) return;
       if (error.status === 401) showAuth("登录已过期，请重新登录。");
       else syncStatus("云端暂不可用，本机进度仍可使用。");
     }
@@ -840,7 +857,10 @@
   }
 
   function showAuth(message = "") {
+    authGeneration += 1;
     clearTimeout(syncTimer);
+    syncBusy = false;
+    applyingCloud = false;
     authUser = null;
     byId("app-shell").hidden = true;
     byId("auth-screen").hidden = false;
@@ -874,6 +894,9 @@
   }
 
   async function activateUser(user, offline = false) {
+    authGeneration += 1;
+    clearTimeout(syncTimer);
+    syncBusy = false;
     authUser = user;
     localStorage.setItem(LAST_USER_STORE, JSON.stringify(user));
     byId("account-name").textContent = user.username;
