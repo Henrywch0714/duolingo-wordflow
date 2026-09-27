@@ -80,6 +80,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .card-kind.review { background: #f7eadc; color: #a67a47; }
 .card-kind.overdue { background: #fae9e4; color: #bb6a5a; }
 .card-index { color: #a3aca3; font-size: 12px; font-weight: 700; }
+.card-location { color: #a6b0a7; font-size: 10px; font-weight: 800; letter-spacing: .1em; margin: 11px 0 -15px; text-align: center; }
 .card-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 22px 0; }
 .card-prompt { color: #a0aaa0; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .word-line { display: flex; align-items: center; justify-content: center; gap: 14px; max-width: 100%; }
@@ -107,6 +108,25 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .empty-state h3 { margin: 8px 0 7px; font-size: 22px; }
 .empty-state p { margin: 0; color: #8a978e; font-size: 13px; line-height: 1.7; }
 .panel-description { color: #87928a; font-size: 13px; line-height: 1.6; }
+.catalog-toolbar { display: flex; gap: 9px; margin: 20px 0 17px; }
+.catalog-toolbar label { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e1e7dc; border-radius: 9px; padding: 0 12px; height: 43px; color: #7e8d82; font-size: 12px; font-weight: 800; }
+.catalog-toolbar select { border: 0; background: transparent; color: var(--ink); min-width: 62px; font-weight: 700; }
+.catalog-toolbar input { flex: 1; min-width: 0; padding: 0 14px; border: 1px solid #e1e7dc; border-radius: 9px; outline: 0; font-size: 13px; }
+.catalog-summary { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
+.catalog-summary strong { font-size: 14px; }
+.catalog-summary span { color: #9aa69c; font-size: 12px; }
+.catalog-list { display: grid; gap: 8px; }
+.catalog-item { background: #fff; border: 1px solid #e1e7df; border-radius: 11px; padding: 13px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.catalog-item-main { min-width: 0; }
+.catalog-item strong { display: block; font-family: Georgia,serif; font-size: 19px; font-weight: 500; overflow-wrap: anywhere; }
+.catalog-item p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: #819084; }
+.catalog-item small { color: #a1aca1; font-size: 10px; }
+.catalog-stats { display: grid; gap: 3px; text-align: right; white-space: nowrap; }
+.catalog-stats b { font-size: 13px; color: var(--green); }
+.catalog-stats span { color: #99a59c; font-size: 10px; }
+.catalog-pagination { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 17px; }
+.catalog-pagination button { border: 1px solid #dbe4d9; border-radius: 8px; background: #fff; color: var(--green); padding: 9px 12px; font-size: 12px; font-weight: 700; }
+.catalog-pagination span { color: #8d9a91; font-size: 11px; }
 .mistake-tools { display: flex; gap: 10px; margin: 20px 0; }
 .mistake-tools input { flex: 1; min-width: 0; height: 44px; padding: 0 14px; border: 1px solid #dfe5db; border-radius: 9px; outline: none; background: #fff; font-size: 13px; }
 .mistake-tools button, .backup-actions button, .import-button { border: 0; background: var(--green); color: #fff; border-radius: 9px; padding: 0 16px; min-height: 44px; font-weight: 750; font-size: 12px; white-space: nowrap; }
@@ -143,6 +163,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .plan-bar-fill { width: 100%; min-height: 3px; background: #8cbf8d; border-radius: 5px 5px 0 0; }
 .plan-day.today .plan-bar-fill { background: var(--green); }
 .plan-day span { display: block; font-size: 10px; color: #98a69a; margin-top: 5px; }
+.sync-card { display: block; }
+.sync-card .sync-status { margin-top: 9px; color: var(--green); font-weight: 700; }
+.sync-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.sync-controls input { flex: 1; min-width: 190px; height: 43px; border: 1px solid #dfe5dc; border-radius: 8px; padding: 0 12px; font-size: 13px; }
+.sync-controls button, .sync-choice button { min-height: 43px; border: 0; border-radius: 8px; background: var(--green); color: #fff; padding: 0 16px; font-size: 12px; font-weight: 750; }
+.sync-controls #sync-disconnect, .sync-choice #sync-use-cloud { background: #e9f2e7; color: var(--green); }
+.sync-choice { margin-top: 14px; border: 1px solid #eadcb7; background: #fffaf0; border-radius: 10px; padding: 14px; }
+.sync-choice p { margin-bottom: 12px; color: #8b7150; }
+.sync-choice button { margin-right: 7px; margin-bottom: 5px; }
 .backup-actions { display: flex; gap: 8px; }
 .backup-actions button { background: #e9f2e7; color: var(--green); }
 .import-button { display: inline-flex; align-items: center; cursor: pointer; }
@@ -182,6 +211,8 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
   .answer-actions, .reveal-actions { gap: 10px; margin-top: 13px; }
   .answer-actions button, .reveal-actions button { min-height: 49px; }
   .mistake-list { grid-template-columns: 1fr; }
+  .catalog-toolbar { flex-wrap: wrap; }
+  .catalog-toolbar input { flex-basis: 100%; height: 43px; }
   .mistake-tools { flex-wrap: wrap; }
   .mistake-tools input { flex-basis: 100%; }
   .mistake-tools button { width: 100%; }

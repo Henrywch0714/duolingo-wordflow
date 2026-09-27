@@ -21,7 +21,7 @@
             <small>WORDFLOW</small>
           </div>
         </div>
-        <span class="device-pill"><span class="status-dot"></span> 进度存于此设备</span>
+        <span class="device-pill" id="sync-pill"><span class="status-dot"></span> 进度存于此设备</span>
       </header>
 
       <main>
@@ -38,7 +38,7 @@
           <div class="overview-top">
             <div>
               <span class="section-kicker">今日进度</span>
-              <div class="progress-number"><strong id="done-count">0</strong><span> / <span id="goal-display">20</span> 张</span></div>
+              <div class="progress-number"><strong id="done-count">0</strong><span> / <span id="goal-display">2 list · 20 张</span></span></div>
             </div>
             <span class="progress-percent" id="progress-percent">0%</span>
           </div>
@@ -52,6 +52,7 @@
 
         <nav class="tabs" aria-label="学习页面">
           <button class="tab active" type="button" data-tab="today" aria-current="page">今日单词</button>
+          <button class="tab" type="button" data-tab="catalog">全部词表</button>
           <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
           <button class="tab" type="button" data-tab="settings">设置与备份</button>
         </nav>
@@ -91,6 +92,7 @@
                 <span class="card-kind" id="card-kind">新词</span>
                 <span class="card-index" id="card-index">01 / 20</span>
               </div>
+              <p class="card-location" id="card-location">UNIT 01 · LIST 01 · 01/10</p>
               <div class="card-center">
                 <span class="card-prompt" id="card-prompt">先看英文，再选择</span>
                 <div class="word-line">
@@ -121,6 +123,29 @@
             <div class="empty-glyph" aria-hidden="true">✦</div>
             <h3 id="today-empty-title">今天完成啦</h3>
             <p id="today-empty-text">你已完成今日计划。明天继续，记忆会慢慢变得牢固。</p>
+          </div>
+        </section>
+
+        <section class="panel" id="catalog-panel">
+          <div class="panel-intro">
+            <div>
+              <span class="section-kicker">THE WHOLE DECK</span>
+              <h2>全部单词</h2>
+            </div>
+            <span class="queue-note">3590 个单词</span>
+          </div>
+          <p class="panel-description">词序已随机打乱并固定。每 10 词为 1 list，每 10 list 为 1 unit；学习次数包含“认识”和“不认识”。</p>
+          <div class="catalog-toolbar">
+            <label>Unit <select id="unit-select" aria-label="选择 unit"></select></label>
+            <label>List <select id="list-select" aria-label="选择 list"></select></label>
+            <input id="catalog-search" type="search" placeholder="搜索英文或中文释义" aria-label="搜索全部单词" />
+          </div>
+          <div class="catalog-summary"><strong id="catalog-title">Unit 1 · List 1</strong><span id="catalog-count">10 词</span></div>
+          <div class="catalog-list" id="catalog-list"></div>
+          <div class="catalog-pagination" id="catalog-pagination" hidden>
+            <button type="button" id="catalog-prev">上一页</button>
+            <span id="catalog-page"></span>
+            <button type="button" id="catalog-next">下一页</button>
           </div>
         </section>
 
@@ -159,10 +184,10 @@
             </div>
           </div>
           <div class="setting-card">
-            <div><h3>每日背词数量</h3><p>包含逾期、到期和新词；未完成的自动留到下一天。</p></div>
+            <div><h3>每日背词数量</h3><p>1 list = 10 张词卡，10 list = 1 unit。最少设置 1 list；逾期词优先，未完成的顺延。</p></div>
             <form id="goal-form" class="goal-form">
-              <input id="goal-input" type="number" min="1" max="200" inputmode="numeric" aria-label="每日背词数量" required />
-              <span>张 / 天</span>
+              <input id="goal-input" type="number" min="1" max="359" step="1" inputmode="numeric" aria-label="每日背词 list 数量" required />
+              <span>list / 天</span>
               <button type="submit">保存</button>
             </form>
           </div>
@@ -174,14 +199,28 @@
             <div><h3>未来 7 天复习预览</h3><p>今天包含逾期词；实际每日安排仍以你设置的数量为准。</p></div>
             <div class="plan-list" id="plan-list" aria-label="未来七天到期复习词数量"></div>
           </div>
+          <div class="setting-card sync-card">
+            <div><h3>云端同步</h3><p>用独立口令把学习进度保存到 MongoDB。先在这台设备连接，再在 iPhone 输入同一口令。</p><p class="sync-status" id="sync-status">尚未连接云端，进度保存在本机。</p></div>
+            <div class="sync-controls">
+              <input id="sync-key" type="password" minlength="8" autocomplete="new-password" placeholder="输入同步口令" aria-label="同步口令" />
+              <button type="button" id="sync-connect">连接云端</button>
+              <button type="button" id="sync-now" hidden>立即同步</button>
+              <button type="button" id="sync-disconnect" hidden>断开连接</button>
+            </div>
+            <div class="sync-choice" id="sync-choice" hidden>
+              <p>本机和云端都有进度。请选择保留哪一份；另一份会被覆盖。建议先导出本机备份。</p>
+              <button type="button" id="sync-use-cloud">使用云端进度</button>
+              <button type="button" id="sync-use-local">上传本机进度</button>
+            </div>
+          </div>
           <div class="setting-card">
-            <div><h3>进度备份</h3><p>进度只保存在这台设备。定期导出备份，换设备时可以导入。</p></div>
+            <div><h3>进度备份</h3><p>定期导出备份，换设备或云端异常时可以导入。</p></div>
             <div class="backup-actions">
               <button type="button" id="export-button">导出进度</button>
               <label class="import-button">导入进度<input id="import-input" type="file" accept=".json,application/json" /></label>
             </div>
           </div>
-          <p class="settings-footnote">词库共 3590 词。建议先在 iPhone Safari 中添加到主屏幕，再开始背词；Safari 页面与主屏幕应用的进度可能不共用。间隔安排是学习辅助规则。</p>
+          <p class="settings-footnote">词库共 3590 词。建议在 iPhone Safari 中添加到主屏幕。Safari 页面与主屏幕应用可能使用不同的本机存储，请分别连接云端。间隔安排是学习辅助规则。</p>
         </section>
       </main>
 
