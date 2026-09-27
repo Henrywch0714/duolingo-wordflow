@@ -5,9 +5,10 @@
   const DB_NAME = "wordflow-progress";
   const DB_STORE = "data";
   const STATE_KEY = "state";
-  const FALLBACK_KEY = "wordflow-state-v1";
-  const SYNC_API = location.hostname.endsWith("vercel.app") ? "/api/sync" : "https://duolingo-wordflow.vercel.app/api/sync";
-  const SYNC_KEY_STORE = "wordflow-sync-key";
+  const FALLBACK_KEY = "wordflow-state-v2";
+  const SYNC_API = "/api/sync";
+  const AUTH_API = "/api/auth";
+  const LAST_USER_STORE = "wordflow-last-user";
   const SYNC_REV_STORE = "wordflow-sync-revision";
   const SYNC_DIRTY_STORE = "wordflow-sync-dirty";
   const byId = (id) => document.getElementById(id);
@@ -30,7 +31,9 @@
   let selectedUnit = 1;
   let selectedList = 1;
   let catalogPage = 0;
-  let syncKey = "";
+  let authUser = null;
+  let authMode = "login";
+  let appBound = false;
   let syncRevision = 0;
   let syncDirty = false;
   let syncBusy = false;
@@ -38,6 +41,10 @@
   let syncTimer = null;
   let pendingCloud = null;
   let applyingCloud = false;
+
+  function userKey(base) {
+    return `${base}:${authUser.id}`;
+  }
 
   function defaultState() {
     return {
@@ -94,7 +101,7 @@
 
   function idbRead() {
     return new Promise((resolve, reject) => {
-      const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(STATE_KEY);
+      const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(userKey(STATE_KEY));
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -103,7 +110,7 @@
   function idbWrite(value) {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, "readwrite");
-      tx.objectStore(DB_STORE).put(value, STATE_KEY);
+      tx.objectStore(DB_STORE).put(value, userKey(STATE_KEY));
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -133,7 +140,7 @@
       console.warn("IndexedDB unavailable; using localStorage.", error);
     }
     try {
-      const saved = localStorage.getItem(FALLBACK_KEY);
+      const saved = localStorage.getItem(userKey(FALLBACK_KEY));
       return saved ? normalizeState(JSON.parse(saved)) : defaultState();
     } catch (error) {
       console.warn("Saved progress could not be loaded.", error);
@@ -144,10 +151,10 @@
   async function saveState() {
     try {
       if (db) await idbWrite(state);
-      else localStorage.setItem(FALLBACK_KEY, JSON.stringify(state));
-      if (syncKey && !applyingCloud) {
+      else localStorage.setItem(userKey(FALLBACK_KEY), JSON.stringify(state));
+      if (authUser && !applyingCloud) {
         syncDirty = true;
-        localStorage.setItem(SYNC_DIRTY_STORE, "1");
+        localStorage.setItem(userKey(SYNC_DIRTY_STORE), "1");
         queueSync();
       }
     } catch (error) {
@@ -156,20 +163,17 @@
     }
   }
 
-  function syncStatus(message, connected = Boolean(syncKey)) {
+  function syncStatus(message, connected = Boolean(authUser)) {
     byId("sync-status").textContent = message;
-    byId("sync-pill").innerHTML = `<span class="status-dot"></span> ${connected ? "云端已连接" : "进度存于此设备"}`;
-    byId("sync-now").hidden = !connected;
-    byId("sync-disconnect").hidden = !connected;
-    byId("sync-connect").hidden = connected;
-    byId("sync-key").hidden = connected;
+    byId("sync-pill").innerHTML = `<span class="status-dot"></span> ${connected ? "已登录" : "离线使用"}`;
   }
 
   async function syncRequest(method, payload) {
     const response = await fetch(SYNC_API, {
       method,
-      headers: { Authorization: `Bearer ${syncKey}`, ...(payload ? { "Content-Type": "application/json" } : {}) },
+      headers: payload ? { "Content-Type": "application/json" } : {},
       body: payload ? JSON.stringify(payload) : undefined,
+      credentials: "same-origin",
       cache: "no-store"
     });
     const data = await response.json().catch(() => ({}));
@@ -204,8 +208,8 @@
       applyingCloud = false;
     }
     syncRevision = record.revision;
-    localStorage.setItem(SYNC_REV_STORE, String(syncRevision));
-    localStorage.removeItem(SYNC_DIRTY_STORE);
+    localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
+    localStorage.removeItem(userKey(SYNC_DIRTY_STORE));
     syncDirty = false;
     syncConflict = false;
     pendingCloud = null;
@@ -223,7 +227,7 @@
   }
 
   async function pushSync() {
-    if (!syncKey || syncBusy || syncConflict) return;
+    if (!authUser || syncBusy || syncConflict) return;
     syncBusy = true;
     let saved = false;
     syncStatus("正在保存到云端…");
@@ -232,10 +236,10 @@
       const result = await syncRequest("PUT", { revision: syncRevision, state: JSON.parse(snapshot) });
       saved = true;
       syncRevision = result.revision;
-      localStorage.setItem(SYNC_REV_STORE, String(syncRevision));
+      localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
       if (JSON.stringify(state) === snapshot) {
         syncDirty = false;
-        localStorage.removeItem(SYNC_DIRTY_STORE);
+        localStorage.removeItem(userKey(SYNC_DIRTY_STORE));
       }
       syncStatus(`已同步到云端 · 版本 ${syncRevision}`);
     } catch (error) {
@@ -243,8 +247,8 @@
         try { showSyncChoice(await syncRequest("GET")); }
         catch { syncStatus("云端版本发生冲突，稍后点“立即同步”重试。"); }
       } else {
-        if (error.status === 401) syncConflict = true;
-        syncStatus(error.status === 401 ? "同步口令错误，请断开后重新连接。" : "云端暂不可用，本机进度已保存；稍后点“立即同步”重试。");
+        if (error.status === 401) showAuth("登录已过期，请重新登录。");
+        else syncStatus("云端暂不可用，本机进度已保存；稍后点“立即同步”重试。");
       }
     } finally {
       syncBusy = false;
@@ -254,28 +258,14 @@
 
   function queueSync(delay = 700) {
     clearTimeout(syncTimer);
-    if (syncKey && !syncConflict) syncTimer = setTimeout(pushSync, delay);
+    if (authUser && !syncConflict) syncTimer = setTimeout(pushSync, delay);
   }
 
-  async function connectSync(saved = false) {
-    const entered = saved ? localStorage.getItem(SYNC_KEY_STORE) : byId("sync-key").value.trim();
-    if (!entered || entered.length < 8) {
-      showToast("请输入同步口令");
-      return;
-    }
-    const oldKey = localStorage.getItem(SYNC_KEY_STORE);
-    syncKey = entered;
-    if (oldKey !== entered) {
-      syncRevision = 0;
-      syncDirty = false;
-      localStorage.removeItem(SYNC_REV_STORE);
-      localStorage.removeItem(SYNC_DIRTY_STORE);
-    }
+  async function connectSync() {
+    if (!authUser) return;
     syncStatus("正在连接云端…");
     try {
       const record = await syncRequest("GET");
-      localStorage.setItem(SYNC_KEY_STORE, syncKey);
-      byId("sync-key").value = "";
       if (!record.state) {
         syncRevision = 0;
         syncConflict = false;
@@ -292,12 +282,8 @@
         showSyncChoice(record);
       }
     } catch (error) {
-      if (!saved) {
-        syncKey = "";
-        syncStatus(error.status === 401 ? "口令错误，请检查后重试。" : "云端暂不可用，请稍后重试。", false);
-      } else {
-        syncStatus(error.status === 401 ? "同步口令已失效，请断开后重新连接。" : "云端暂不可用，本机进度仍可使用。");
-      }
+      if (error.status === 401) showAuth("登录已过期，请重新登录。");
+      else syncStatus("云端暂不可用，本机进度仍可使用。");
     }
   }
 
@@ -819,39 +805,79 @@
     });
     byId("export-button").addEventListener("click", exportProgress);
     byId("import-input").addEventListener("change", (event) => importProgress(event.target.files?.[0]));
-    byId("sync-connect").addEventListener("click", () => connectSync());
-    byId("sync-now").addEventListener("click", () => syncDirty ? pushSync() : connectSync(true));
-    byId("sync-disconnect").addEventListener("click", () => {
-      clearTimeout(syncTimer);
-      syncKey = "";
-      syncRevision = 0;
-      syncDirty = false;
-      syncConflict = false;
-      pendingCloud = null;
-      localStorage.removeItem(SYNC_KEY_STORE);
-      localStorage.removeItem(SYNC_REV_STORE);
-      localStorage.removeItem(SYNC_DIRTY_STORE);
-      byId("sync-choice").hidden = true;
-      syncStatus("已断开云端连接，进度仍保存在本机。", false);
-    });
+    byId("sync-now").addEventListener("click", () => syncDirty ? pushSync() : connectSync());
+    byId("auth-logout").addEventListener("click", logout);
     byId("sync-use-cloud").addEventListener("click", async () => {
       if (pendingCloud) await useCloud(pendingCloud);
     });
     byId("sync-use-local").addEventListener("click", async () => {
       if (!pendingCloud) return;
       syncRevision = pendingCloud.revision;
-      localStorage.setItem(SYNC_REV_STORE, String(syncRevision));
+      localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
       syncConflict = false;
       pendingCloud = null;
       byId("sync-choice").hidden = true;
       syncDirty = true;
-      localStorage.setItem(SYNC_DIRTY_STORE, "1");
+      localStorage.setItem(userKey(SYNC_DIRTY_STORE), "1");
       await pushSync();
     });
   }
 
-  async function init() {
-    try {
+  function setAuthMode(mode) {
+    authMode = mode;
+    byId("auth-login-tab").classList.toggle("active", mode === "login");
+    byId("auth-register-tab").classList.toggle("active", mode === "register");
+    byId("auth-login-tab").setAttribute("aria-selected", String(mode === "login"));
+    byId("auth-register-tab").setAttribute("aria-selected", String(mode === "register"));
+    byId("auth-password").autocomplete = mode === "register" ? "new-password" : "current-password";
+    byId("auth-password").minLength = mode === "register" ? 12 : 1;
+    byId("auth-password").placeholder = mode === "register" ? "至少 12 位密码" : "输入你的密码";
+    byId("auth-submit").textContent = mode === "register" ? "注册并开始" : "登录并继续";
+    byId("auth-hint").textContent = mode === "register"
+      ? "用户名为 3–32 位字母、数字或下划线。请保存密码；目前不提供自助找回。"
+      : "登录后将在这台设备保持登录 90 天。";
+    byId("auth-error").hidden = true;
+  }
+
+  function showAuth(message = "") {
+    clearTimeout(syncTimer);
+    authUser = null;
+    byId("app-shell").hidden = true;
+    byId("auth-screen").hidden = false;
+    byId("auth-error").textContent = message;
+    byId("auth-error").hidden = !message;
+  }
+
+  async function authRequest(method, body) {
+    const response = await fetch(AUTH_API, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(data.error || `HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  }
+
+  function authErrorMessage(error) {
+    if (error.status === 409) return "这个用户名已被使用，请换一个。";
+    if (error.status === 429) return "尝试次数过多，请稍后再试。";
+    if (error.message === "weak_password") return "注册密码至少需要 12 位。";
+    if (error.message === "invalid_credentials") return authMode === "register" ? "请检查用户名和密码格式。" : "用户名或密码不正确。";
+    return "账户服务暂不可用，请检查网络后重试。";
+  }
+
+  async function activateUser(user, offline = false) {
+    authUser = user;
+    localStorage.setItem(LAST_USER_STORE, JSON.stringify(user));
+    byId("account-name").textContent = user.username;
+    if (!words.length) {
       const response = await fetch("./words.json");
       if (!response.ok) throw new Error(`词库加载失败：${response.status}`);
       words = await response.json();
@@ -860,30 +886,90 @@
       }
       wordMap = new Map(words.map((item) => [item.word, item]));
       if (wordMap.size !== words.length) throw new Error("词库中存在重复单词");
-      state = await loadState();
-      const newDeck = ensureDeckOrder();
-      if (newDeck) await saveState();
-      byId("difficulty-filter").value = state.difficultyFilter;
-      byId("polarity-filter").value = state.polarityFilter;
-      populateCatalogControls();
+    }
+    if (db) db.close();
+    state = await loadState();
+    applyingCloud = true;
+    try {
+      if (ensureDeckOrder()) await saveState();
+    } finally {
+      applyingCloud = false;
+    }
+    syncRevision = Number(localStorage.getItem(userKey(SYNC_REV_STORE))) || 0;
+    syncDirty = localStorage.getItem(userKey(SYNC_DIRTY_STORE)) === "1";
+    syncConflict = false;
+    pendingCloud = null;
+    byId("sync-choice").hidden = true;
+    practiceQueue = [];
+    byId("mistake-practice").hidden = true;
+    if (!appBound) {
       bindEvents();
-      renderToday();
-      renderCatalog();
-      renderMistakes();
-      syncRevision = Number(localStorage.getItem(SYNC_REV_STORE)) || 0;
-      syncDirty = localStorage.getItem(SYNC_DIRTY_STORE) === "1";
-      if (localStorage.getItem(SYNC_KEY_STORE)) connectSync(true);
-      else syncStatus("尚未连接云端，进度保存在本机。", false);
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js").catch((error) => console.warn("Offline cache unavailable.", error));
+      appBound = true;
+    }
+    renderAll();
+    byId("auth-screen").hidden = true;
+    byId("app-shell").hidden = false;
+    if (offline) syncStatus("当前离线，本机进度可继续使用；联网后点“立即同步”。", false);
+    else connectSync();
+  }
+
+  async function logout() {
+    try {
+      await authRequest("POST", { action: "logout" });
+      localStorage.removeItem(LAST_USER_STORE);
+      showAuth();
+      byId("auth-password").value = "";
+      setAuthMode("login");
+    } catch {
+      showToast("暂时无法退出登录，请联网后重试。");
+    }
+  }
+
+  function bindAuthEvents() {
+    byId("auth-login-tab").addEventListener("click", () => setAuthMode("login"));
+    byId("auth-register-tab").addEventListener("click", () => setAuthMode("register"));
+    byId("auth-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = byId("auth-submit");
+      button.disabled = true;
+      byId("auth-error").hidden = true;
+      try {
+        const result = await authRequest("POST", {
+          action: authMode,
+          username: byId("auth-username").value,
+          password: byId("auth-password").value
+        });
+        byId("auth-password").value = "";
+        await activateUser(result.user);
+      } catch (error) {
+        console.warn("Account request failed.", error);
+        byId("auth-error").textContent = authErrorMessage(error);
+        byId("auth-error").hidden = false;
+      } finally {
+        button.disabled = false;
       }
+    });
+  }
+
+  async function init() {
+    bindAuthEvents();
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch((error) => console.warn("Offline cache unavailable.", error));
+    }
+    try {
+      const result = await authRequest("GET");
+      await activateUser(result.user);
     } catch (error) {
-      console.error(error);
-      byId("today-card-wrap").hidden = true;
-      byId("today-empty").hidden = false;
-      byId("today-empty-title").textContent = "词库暂时无法加载";
-      byId("today-empty-text").textContent = "请检查网络后刷新页面。";
-      showToast("词库加载失败");
+      if (error.status === 401) showAuth();
+      else {
+        try {
+          const remembered = JSON.parse(localStorage.getItem(LAST_USER_STORE) || "null");
+          if (!remembered?.id || !remembered?.username) throw new Error("No offline account");
+          await activateUser(remembered, true);
+        } catch {
+          showAuth("网络暂不可用，请联网后登录。 ");
+        }
+      }
     }
   }
 

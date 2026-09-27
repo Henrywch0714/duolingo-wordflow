@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordflow-v3";
+const CACHE_NAME = "wordflow-v4";
 const APP_FILES = [
   "./",
   "./index.html",

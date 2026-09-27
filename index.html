@@ -10,9 +10,29 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <link rel="stylesheet" href="./styles.css" />
     <title>词间 · 多邻国单词卡</title>
+    <script>if (location.hostname.endsWith(".github.io")) location.replace("https://duolingo-wordflow.vercel.app/");</script>
   </head>
   <body>
-    <div class="app-shell">
+    <section class="auth-screen" id="auth-screen">
+      <div class="auth-card">
+        <div class="auth-brand"><span class="auth-brand-mark">✦</span><span>词间 <small>WORDFLOW</small></span></div>
+        <span class="auth-eyebrow">A LITTLE EVERY DAY</span>
+        <h1>从今天开始，<br /><em>把单词记下来。</em></h1>
+        <p class="auth-lead">注册或登录后，你的词卡、错题和复习计划会分别保存在自己的账户中。</p>
+        <div class="auth-tabs" role="tablist" aria-label="账户操作">
+          <button type="button" id="auth-login-tab" class="active" role="tab" aria-selected="true">登录</button>
+          <button type="button" id="auth-register-tab" role="tab" aria-selected="false">注册</button>
+        </div>
+        <form id="auth-form" class="auth-form">
+          <label>用户名<input id="auth-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]+" required placeholder="字母、数字或下划线" /></label>
+          <label>密码<input id="auth-password" name="password" type="password" autocomplete="current-password" required placeholder="输入你的密码" /></label>
+          <p id="auth-hint" class="auth-hint">登录后将在这台设备保持登录 90 天。</p>
+          <p id="auth-error" class="auth-error" role="alert" hidden></p>
+          <button id="auth-submit" type="submit">登录并继续</button>
+        </form>
+      </div>
+    </section>
+    <div class="app-shell" id="app-shell" hidden>
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
@@ -21,7 +41,7 @@
             <small>WORDFLOW</small>
           </div>
         </div>
-        <span class="device-pill" id="sync-pill"><span class="status-dot"></span> 进度存于此设备</span>
+        <span class="device-pill" id="sync-pill"><span class="status-dot"></span> 正在连接</span>
       </header>
 
       <main>
@@ -200,12 +220,10 @@
             <div class="plan-list" id="plan-list" aria-label="未来七天到期复习词数量"></div>
           </div>
           <div class="setting-card sync-card">
-            <div><h3>云端同步</h3><p>用独立口令把学习进度保存到 MongoDB。先在这台设备连接，再在 iPhone 输入同一口令。</p><p class="sync-status" id="sync-status">尚未连接云端，进度保存在本机。</p></div>
+            <div><h3>账户与云端同步</h3><p>当前账户：<strong id="account-name">—</strong>。登录状态保持 90 天；每个账户的学习记录分别保存。</p><p class="sync-status" id="sync-status">正在连接云端…</p></div>
             <div class="sync-controls">
-              <input id="sync-key" type="password" minlength="8" autocomplete="new-password" placeholder="输入同步口令" aria-label="同步口令" />
-              <button type="button" id="sync-connect">连接云端</button>
-              <button type="button" id="sync-now" hidden>立即同步</button>
-              <button type="button" id="sync-disconnect" hidden>断开连接</button>
+              <button type="button" id="sync-now">立即同步</button>
+              <button type="button" id="auth-logout">退出登录</button>
             </div>
             <div class="sync-choice" id="sync-choice" hidden>
               <p>本机和云端都有进度。请选择保留哪一份；另一份会被覆盖。建议先导出本机备份。</p>
@@ -220,7 +238,7 @@
               <label class="import-button">导入进度<input id="import-input" type="file" accept=".json,application/json" /></label>
             </div>
           </div>
-          <p class="settings-footnote">词库共 3590 词。建议在 iPhone Safari 中添加到主屏幕。Safari 页面与主屏幕应用可能使用不同的本机存储，请分别连接云端。间隔安排是学习辅助规则。</p>
+          <p class="settings-footnote">词库共 3590 词。建议在 iPhone Safari 中添加到主屏幕。Safari 页面与主屏幕应用可能使用不同的本机缓存，登录同一账户后即可同步。间隔安排是学习辅助规则。</p>
         </section>
       </main>
 
