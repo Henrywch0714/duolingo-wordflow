@@ -72,8 +72,11 @@
 
         <nav class="tabs" aria-label="学习页面">
           <button class="tab active" type="button" data-tab="today" aria-current="page">今日单词</button>
+          <button class="tab" type="button" data-tab="review">复习测验</button>
+          <button class="tab" type="button" data-tab="free">自由复习</button>
           <button class="tab" type="button" data-tab="catalog">全部词表</button>
           <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
+          <button class="tab" type="button" data-tab="synonyms">近义词</button>
           <button class="tab" type="button" data-tab="settings">设置与备份</button>
         </nav>
 
@@ -86,25 +89,11 @@
             <span class="queue-note" id="queue-note">准备中</span>
           </div>
 
-          <div class="filter-bar">
-            <label>新词难度
-              <select id="difficulty-filter">
-                <option value="全部">全部</option>
-                <option value="易">易</option>
-                <option value="中">中</option>
-                <option value="难">难</option>
-              </select>
-            </label>
-            <label>新词倾向
-              <select id="polarity-filter">
-                <option value="全部">全部</option>
-                <option value="正向">正向</option>
-                <option value="负面">负面</option>
-                <option value="中性">中性</option>
-              </select>
-            </label>
+          <div class="system-review-callout" id="system-review-callout" hidden>
+            <strong id="system-review-count">有单词需要复习</strong>
+            <p>先完成到期复习，再继续今天的新词。</p>
+            <button type="button" id="start-system-review">开始系统复习</button>
           </div>
-          <p class="filter-hint">筛选只影响新词；到期复习词始终优先安排。</p>
 
           <div class="flashcard-wrap" id="today-card-wrap">
             <article class="flashcard" id="today-card">
@@ -119,11 +108,12 @@
                   <h3 id="card-word">—</h3>
                   <button class="sound-button" id="speak-button" type="button" aria-label="朗读单词" title="朗读单词">♫</button>
                 </div>
-                <div class="word-tags"><span id="card-difficulty">易</span><span id="card-polarity">中性</span></div>
                 <div class="translation" id="translation" hidden>
                   <span>中文释义</span>
                   <p id="card-gloss"></p>
                 </div>
+                <button type="button" class="synonym-toggle" id="study-synonyms-button" hidden>查看近义词</button>
+                <div class="synonym-inline" id="study-synonyms" hidden></div>
               </div>
               <div class="card-bottom">
                 <span class="card-swipe-hint" id="card-hint">想好了吗？按下你的判断。</span>
@@ -146,6 +136,29 @@
           </div>
         </section>
 
+        <section class="panel" id="review-panel">
+          <div class="panel-intro review-intro"><div><span class="section-kicker">RECALL TEST</span><h2 id="review-title">复习测验</h2></div><button type="button" class="quiet-button" id="exit-review">结束本轮</button></div>
+          <div class="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
+          <div class="quiz-card" id="quiz-card" hidden>
+            <span class="quiz-direction" id="quiz-direction">英译中 · 第 1 题</span>
+            <div class="quiz-prompt" id="quiz-prompt"></div>
+            <div class="quiz-options" id="quiz-options"></div>
+            <button type="button" class="dont-remember" id="quiz-forgot">不记得</button>
+            <div class="quiz-result" id="quiz-result" hidden><strong id="quiz-result-title"></strong><p id="quiz-correct-pair"></p><button type="button" class="synonym-toggle" id="quiz-synonyms-button">查看近义词</button><div class="synonym-inline" id="quiz-synonyms" hidden></div></div>
+            <button type="button" class="primary-button" id="quiz-next" hidden>下一题 →</button>
+          </div>
+          <div class="empty-state" id="review-empty" hidden><h3 id="review-empty-title">本轮完成</h3><p id="review-empty-text"></p><button type="button" class="primary-button" id="review-finish">返回</button></div>
+        </section>
+
+        <section class="panel" id="free-panel">
+          <div class="panel-intro"><div><span class="section-kicker">PRACTICE YOUR WAY</span><h2>自由复习</h2></div></div>
+          <p class="panel-description">从已学过的 List 多选，或复习今天学的新词。自由复习不会增加错次，也不会改变系统复习日期。</p>
+          <div class="review-filters"><label>难度<select id="free-difficulty"><option value="全部">全部</option><option value="易">易</option><option value="中">中</option><option value="难">难</option></select></label><label>情感色彩<select id="free-polarity"><option value="全部">全部</option><option value="正向">正向</option><option value="负面">负面</option><option value="中性">中性</option></select></label></div>
+          <div class="free-actions"><button type="button" class="primary-button" id="review-today-new">一键复习今日新词</button><button type="button" class="primary-button secondary" id="review-selected-lists">复习选中的 List</button></div>
+          <p class="selection-hint" id="free-selection-count">已选择 0 个 List</p>
+          <div class="free-list-picker" id="free-list-picker"></div>
+        </section>
+
         <section class="panel" id="catalog-panel">
           <div class="panel-intro">
             <div>
@@ -154,7 +167,7 @@
             </div>
             <span class="queue-note">3590 个单词</span>
           </div>
-          <p class="panel-description">词序已随机打乱并固定。每 10 词为 1 list，每 10 list 为 1 unit；学习次数包含“认识”和“不认识”。</p>
+          <p class="panel-description">偏好难度的单词全随机编入 Unit/List；其余单词单独放在 Other，只能手动学习。每 10 词为 1 List，每 10 List 为 1 Unit。</p>
           <div class="catalog-toolbar">
             <label>Unit <select id="unit-select" aria-label="选择 unit"></select></label>
             <label>List <select id="list-select" aria-label="选择 list"></select></label>
@@ -177,23 +190,24 @@
             </div>
             <span class="queue-note" id="mistake-summary">0 个单词</span>
           </div>
-          <p class="panel-description">“不认识”会累计一次。这里保留所有曾经答错的词，方便反复巩固。</p>
+          <p class="panel-description">新词标记“不认识”先进入未掌握；系统和错题专项复习答错才累计错次。每道错题计 1 次。</p>
           <div class="mistake-tools">
             <input id="mistake-search" type="search" placeholder="搜索单词或中文释义" aria-label="搜索错题" />
-            <button id="practice-mistakes" type="button">开始错题复习</button>
+            <label>复习数量<input id="mistake-quantity" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="错题复习 list 数量" /> ×10</label><label><input id="mistake-all" type="checkbox" /> 全部</label>
           </div>
-          <div id="mistake-practice" class="mistake-practice" hidden>
-            <div class="practice-head"><strong>错题专项</strong><button id="exit-practice" type="button">结束练习</button></div>
-            <div class="practice-word" id="practice-word"></div>
-            <p class="practice-gloss" id="practice-gloss" hidden></p>
-            <div class="practice-actions" id="practice-actions">
-              <button type="button" id="practice-unknown">不认识</button>
-              <button type="button" id="practice-known">认识</button>
-            </div>
-            <button class="practice-next" id="practice-next" type="button" hidden>下一张 →</button>
-          </div>
+          <div class="review-filters"><label>难度<select id="mistake-difficulty"><option value="全部">全部</option><option value="易">易</option><option value="中">中</option><option value="难">难</option></select></label><label>情感色彩<select id="mistake-polarity"><option value="全部">全部</option><option value="正向">正向</option><option value="负面">负面</option><option value="中性">中性</option></select></label></div>
+          <div class="mistake-groups" id="mistake-groups"></div>
+          <div class="catalog-summary"><strong id="mistake-list-title">未掌握</strong><span id="mistake-list-count">0 词</span></div>
           <div class="mistake-list" id="mistake-list"></div>
           <p class="list-empty" id="mistake-empty" hidden>错题本还是空的，继续保持。</p>
+        </section>
+
+        <section class="panel" id="synonyms-panel">
+          <div class="panel-intro"><div><span class="section-kicker">RELATED WORDS</span><h2>词库近义词</h2></div></div>
+          <p class="panel-description">基于 <a href="https://wordnet.princeton.edu/" target="_blank" rel="noopener noreferrer">Princeton WordNet</a> 的同义词集，仅展示本词库中能匹配的词。不同词义可能有差别，请结合中文释义判断。</p>
+          <input id="synonym-search" class="wide-search" type="search" placeholder="搜索英文或中文释义" aria-label="搜索近义词" />
+          <div id="synonym-list" class="synonym-list"></div>
+          <div class="catalog-pagination" id="synonym-pagination"><button type="button" id="synonym-prev">上一页</button><span id="synonym-page"></span><button type="button" id="synonym-next">下一页</button></div>
         </section>
 
         <section class="panel" id="settings-panel">
@@ -210,6 +224,10 @@
               <span>list / 天</span>
               <button type="submit">保存</button>
             </form>
+          </div>
+          <div class="setting-card">
+            <div><h3>学习难度偏好</h3><p>可多选。保存后，选中的词重新随机编入 Unit/List；其余进入 Other，不自动加入每日计划。至少选择一种。</p></div>
+            <form id="difficulty-form" class="difficulty-form"><label><input type="checkbox" name="difficulty" value="易" /> 简单</label><label><input type="checkbox" name="difficulty" value="中" /> 中等</label><label><input type="checkbox" name="difficulty" value="难" /> 难</label><button type="submit">保存偏好</button></form>
           </div>
           <div class="setting-card">
             <div><h3>复习间隔</h3><p>答对后依次安排在 1、2、4、7、15、30 天后；答错则从短间隔重新开始。</p></div>

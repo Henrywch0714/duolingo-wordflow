@@ -1,10 +1,11 @@
-const CACHE_NAME = "wordflow-v4";
+const CACHE_NAME = "wordflow-v5";
 const APP_FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./words.json",
+  "./synonyms.json",
   "./manifest.webmanifest",
   "./icon.svg",
   "./apple-touch-icon.png"

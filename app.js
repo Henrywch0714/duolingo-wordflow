@@ -14,18 +14,21 @@
   const byId = (id) => document.getElementById(id);
 
   let words = [];
+  let synonymMap = {};
   let wordMap = new Map();
   let deckIndex = new Map();
+  let activeCount = 0;
   let state = defaultState();
   let currentWord = null;
   let currentKind = "new";
   let revealed = false;
   let undoSnapshot = null;
-  let practiceQueue = [];
-  let practiceIndex = 0;
-  let practiceRevealed = false;
+  let quiz = null;
+  let selectedMistakeGroup = "unmastered";
+  let selectedFreeLists = new Set();
+  let synonymPage = 0;
+  let manualWord = null;
   let answeringToday = false;
-  let answeringPractice = false;
   let db = null;
   let toastTimer = null;
   let selectedUnit = 1;
@@ -49,11 +52,11 @@
 
   function defaultState() {
     return {
-      version: 1,
+      version: 2,
       dailyGoal: 20,
       deckOrder: [],
-      difficultyFilter: "全部",
-      polarityFilter: "全部",
+      preferredDifficulties: ["易", "中", "难"],
+      orderSignature: "",
       progress: {},
       history: {}
     };
@@ -81,6 +84,7 @@
     if (!state.history[key].answers || typeof state.history[key].answers !== "object") {
       state.history[key].answers = {};
     }
+    if (!Array.isArray(state.history[key].newWords)) state.history[key].newWords = [];
     return state.history[key].answers;
   }
 
@@ -124,9 +128,21 @@
     const goal = Number(input.dailyGoal);
     base.dailyGoal = Number.isInteger(goal) && goal >= 1 && goal <= 3590 ? Math.ceil(goal / 10) * 10 : 20;
     if (Array.isArray(input.deckOrder)) base.deckOrder = input.deckOrder;
-    base.difficultyFilter = ["全部", "易", "中", "难"].includes(input.difficultyFilter) ? input.difficultyFilter : "全部";
-    base.polarityFilter = ["全部", "正向", "负面", "中性"].includes(input.polarityFilter) ? input.polarityFilter : "全部";
-    if (input.progress && typeof input.progress === "object" && !Array.isArray(input.progress)) base.progress = input.progress;
+    const preferences = Array.isArray(input.preferredDifficulties)
+      ? input.preferredDifficulties.filter((value) => ["易", "中", "难"].includes(value))
+      : ["易", "中", "难"].includes(input.difficultyFilter) ? [input.difficultyFilter] : ["易", "中", "难"];
+    base.preferredDifficulties = [...new Set(preferences)].sort();
+    if (!base.preferredDifficulties.length) base.preferredDifficulties = ["易", "中", "难"];
+    base.orderSignature = typeof input.orderSignature === "string" ? input.orderSignature : "";
+    if (input.progress && typeof input.progress === "object" && !Array.isArray(input.progress)) {
+      base.progress = Object.fromEntries(Object.entries(input.progress).map(([word, entry]) => [word, {
+        ...entry,
+        wrongCount: Math.max(0, Number(entry?.wrongCount) || 0),
+        knownCount: Math.max(0, Number(entry?.knownCount) || 0),
+        reviewCount: Math.max(0, Number(entry?.reviewCount) || 0),
+        unmastered: Boolean(entry?.unmastered)
+      }]));
+    }
     if (input.history && typeof input.history === "object" && !Array.isArray(input.history)) base.history = input.history;
     return base;
   }
@@ -187,24 +203,31 @@
   }
 
   function hasStudyData(value) {
-    return Object.keys(value.progress || {}).length > 0 || Object.values(value.history || {}).some((day) => Object.keys(day?.answers || {}).length > 0);
+    return Object.keys(value.progress || {}).length > 0 ||
+      Object.values(value.history || {}).some((day) => Object.keys(day?.answers || {}).length > 0) ||
+      value.dailyGoal !== 20 ||
+      [...(value.preferredDifficulties || [])].sort().join("|") !== ["易", "中", "难"].sort().join("|");
   }
 
   function renderAll() {
-    byId("difficulty-filter").value = state.difficultyFilter;
-    byId("polarity-filter").value = state.polarityFilter;
+    document.querySelectorAll('#difficulty-form input[name="difficulty"]').forEach((input) => {
+      input.checked = state.preferredDifficulties.includes(input.value);
+    });
     populateCatalogControls();
     renderToday();
     renderCatalog();
     renderMistakes();
+    renderFreeLists();
+    renderSynonymList();
   }
 
   async function useCloud(record) {
     const generation = authGeneration;
+    let rebuilt = false;
     applyingCloud = true;
     try {
       state = normalizeState(record.state);
-      ensureDeckOrder();
+      rebuilt = ensureDeckOrder();
       await saveState();
     } finally {
       if (generation === authGeneration) applyingCloud = false;
@@ -219,6 +242,11 @@
     byId("sync-choice").hidden = true;
     renderAll();
     syncStatus(`已从云端更新 · 版本 ${syncRevision}`);
+    if (rebuilt) {
+      syncDirty = true;
+      localStorage.setItem(userKey(SYNC_DIRTY_STORE), "1");
+      queueSync();
+    }
   }
 
   function showSyncChoice(record) {
@@ -305,16 +333,27 @@
   }
 
   function ensureDeckOrder() {
+    const preferences = new Set(state.preferredDifficulties);
+    activeCount = words.filter((item) => preferences.has(item.difficulty)).length;
+    const signature = [...preferences].sort().join("|");
     const valid = Array.isArray(state.deckOrder) &&
       state.deckOrder.length === words.length &&
       new Set(state.deckOrder).size === words.length &&
-      state.deckOrder.every((word) => wordMap.has(word));
+      state.deckOrder.every((word) => wordMap.has(word)) &&
+      state.orderSignature === signature &&
+      state.deckOrder.slice(0, activeCount).every((word) => preferences.has(wordMap.get(word).difficulty));
     if (!valid) {
-      state.deckOrder = words.map((item) => item.word);
-      for (let index = state.deckOrder.length - 1; index > 0; index--) {
-        const random = Math.floor(Math.random() * (index + 1));
-        [state.deckOrder[index], state.deckOrder[random]] = [state.deckOrder[random], state.deckOrder[index]];
-      }
+      const shuffle = (array) => {
+        for (let index = array.length - 1; index > 0; index--) {
+          const random = Math.floor(Math.random() * (index + 1));
+          [array[index], array[random]] = [array[random], array[index]];
+        }
+        return array;
+      };
+      const preferred = shuffle(words.filter((item) => preferences.has(item.difficulty)).map((item) => item.word));
+      const other = shuffle(words.filter((item) => !preferences.has(item.difficulty)).map((item) => item.word));
+      state.deckOrder = preferred.concat(other);
+      state.orderSignature = signature;
     }
     deckIndex = new Map(state.deckOrder.map((word, index) => [word, index]));
     return !valid;
@@ -322,10 +361,12 @@
 
   function wordLocation(word) {
     const position = deckIndex.get(word) ?? 0;
-    const listNumber = Math.floor(position / 10);
+    const other = position >= activeCount;
+    const listNumber = Math.floor((other ? position - activeCount : position) / 10);
     return {
+      other,
       unit: Math.floor(listNumber / 10) + 1,
-      list: listNumber % 10 + 1,
+      list: other ? listNumber + 1 : listNumber % 10 + 1,
       card: position % 10 + 1
     };
   }
@@ -341,7 +382,7 @@
   function dueWords() {
     const today = todayKey();
     const answered = getTodayAnswers();
-    return words.filter((item) => {
+    return state.deckOrder.slice(0, activeCount).map((word) => wordMap.get(word)).filter((item) => {
       const progress = state.progress[item.word];
       return progress && progress.dueDate && progress.dueDate <= today && !answered[item.word];
     }).sort((a, b) => {
@@ -353,22 +394,17 @@
 
   function newWords() {
     const answered = getTodayAnswers();
-    return state.deckOrder.map((word) => wordMap.get(word)).filter((item) => {
+    return state.deckOrder.slice(0, activeCount).map((word) => wordMap.get(word)).filter((item) => {
       if (state.progress[item.word] || answered[item.word]) return false;
-      if (state.difficultyFilter !== "全部" && item.difficulty !== state.difficultyFilter) return false;
-      if (state.polarityFilter !== "全部" && item.polarity !== state.polarityFilter) return false;
       return true;
     });
   }
 
   function pickNext() {
+    if (manualWord) return { item: manualWord, kind: "other" };
     if (Object.keys(getTodayAnswers()).length >= state.dailyGoal) return null;
     const due = dueWords();
-    if (due.length) {
-      const item = due[0];
-      const kind = state.progress[item.word].dueDate < todayKey() ? "overdue" : "review";
-      return { item, kind };
-    }
+    if (due.length) return { item: null, kind: "review" };
     const fresh = newWords();
     return fresh.length ? { item: fresh[0], kind: "new" } : null;
   }
@@ -377,14 +413,14 @@
     const done = Object.keys(getTodayAnswers()).length;
     const goal = state.dailyGoal;
     const percent = Math.min(100, Math.round(done / goal * 100));
-    const wrong = Object.values(state.progress).filter((entry) => Number(entry?.wrongCount) > 0).length;
+    const wrong = Object.values(state.progress).filter((entry) => Number(entry?.wrongCount) > 0 || entry?.unmastered).length;
     byId("done-count").textContent = done;
     byId("goal-display").textContent = `${goal / 10} list · ${goal} 张`;
     byId("progress-percent").textContent = `${percent}%`;
     byId("progress-fill").style.width = `${percent}%`;
     byId("progress-track").setAttribute("aria-valuenow", String(percent));
     byId("due-count").textContent = dueWords().length;
-    byId("new-count").textContent = words.filter((item) => !state.progress[item.word]).length;
+    byId("new-count").textContent = newWords().length;
     byId("wrong-count").textContent = wrong;
     byId("mistake-tab-count").textContent = wrong;
     byId("today-label").textContent = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
@@ -396,7 +432,8 @@
   function renderPlan() {
     const today = todayKey();
     const dates = Array.from({ length: 7 }, (_, index) => addDays(today, index));
-    const counts = dates.map((date, index) => Object.values(state.progress).filter((entry) => {
+    const scheduled = state.deckOrder.slice(0, activeCount).map((word) => state.progress[word]).filter(Boolean);
+    const counts = dates.map((date, index) => scheduled.filter((entry) => {
       if (!entry?.dueDate) return false;
       return index === 0 ? entry.dueDate <= today : entry.dueDate === date;
     }).length);
@@ -428,51 +465,58 @@
     currentKind = choice?.kind || "new";
     revealed = false;
     undoSnapshot = null;
+    const needsReview = choice?.kind === "review";
+    byId("system-review-callout").hidden = !needsReview;
+    if (needsReview) byId("system-review-count").textContent = `${dueWords().length} 个单词到期，完成两题后计入今日进度`;
     byId("today-card-wrap").hidden = !currentWord;
-    byId("today-empty").hidden = Boolean(currentWord);
+    byId("today-empty").hidden = Boolean(currentWord) || needsReview;
+    if (needsReview) return;
     if (!currentWord) {
       const goalReached = Object.keys(getTodayAnswers()).length >= state.dailyGoal;
-      byId("today-empty-title").textContent = goalReached ? "今天完成啦" : "这个筛选下暂时没有单词";
+      byId("today-empty-title").textContent = goalReached ? "今天完成啦" : "偏好词库已经学完";
       byId("today-empty-text").textContent = goalReached
         ? "你已完成今日计划。未完成的到期复习会留到明天，继续按顺序安排。"
-        : "可以调整上方的新词筛选条件，或明天再来复习。";
+        : "可以到设置调整难度偏好，或到 Other 手动学习。";
       return;
     }
     byId("today-card").classList.remove("revealed");
     byId("card-kind").className = `card-kind ${currentKind === "new" ? "" : currentKind}`;
-    byId("card-kind").textContent = currentKind === "overdue" ? "逾期复习" : currentKind === "review" ? "到期复习" : "今日新词";
+    byId("card-kind").textContent = currentKind === "other" ? "Other · 手动学习" : "今日新词";
     const currentNumber = Object.keys(getTodayAnswers()).length + 1;
-    byId("card-index").textContent = `${String(currentNumber).padStart(2, "0")} / ${state.dailyGoal}`;
+    byId("card-index").textContent = currentKind === "other" ? "自由学习" : `${String(currentNumber).padStart(2, "0")} / ${state.dailyGoal}`;
     const location = wordLocation(currentWord.word);
-    byId("card-location").textContent = `UNIT ${String(location.unit).padStart(2, "0")} · LIST ${String(location.list).padStart(2, "0")} · ${String(location.card).padStart(2, "0")}/10`;
+    byId("card-location").textContent = `${location.other ? "OTHER" : `UNIT ${String(location.unit).padStart(2, "0")}`} · LIST ${String(location.list).padStart(2, "0")} · ${String(location.card).padStart(2, "0")}/10`;
     byId("card-prompt").textContent = "先看英文，再选择";
     byId("card-word").textContent = currentWord.word;
-    byId("card-difficulty").textContent = `${currentWord.difficulty} · ${currentWord.level}`;
-    byId("card-polarity").textContent = currentWord.polarity;
     byId("translation").hidden = true;
     byId("card-gloss").textContent = "";
+    byId("study-synonyms-button").hidden = true;
+    byId("study-synonyms").hidden = true;
     byId("card-hint").textContent = "想好了吗？按下你的判断。";
     byId("answer-actions").hidden = false;
     byId("reveal-actions").hidden = true;
   }
 
-  async function recordAnswer(item, answer, source) {
+  async function recordLearning(item, answer, source) {
     const today = todayKey();
     const previous = state.progress[item.word] || null;
-    const wrongCount = (Number(previous?.wrongCount) || 0) + (answer === "unknown" ? 1 : 0);
-    const stage = answer === "known" ? Math.min((Number(previous?.stage ?? -1)) + 1, INTERVALS.length - 1) : -1;
-    const days = answer === "known" ? INTERVALS[stage] : 1;
+    const stage = answer === "known" ? 0 : -1;
     state.progress[item.word] = {
-      wrongCount,
+      ...previous,
+      wrongCount: Number(previous?.wrongCount) || 0,
       knownCount: (Number(previous?.knownCount) || 0) + (answer === "known" ? 1 : 0),
+      studyCount: (Number(previous?.studyCount) || 0) + 1,
+      unmastered: answer === "unknown",
       stage,
-      dueDate: addDays(today, days),
+      dueDate: addDays(today, 1),
       lastDate: today,
       lastAnswer: answer
     };
     if (source === "today") getTodayAnswers()[item.word] = answer;
+    getTodayAnswers();
+    if (!state.history[today].newWords.includes(item.word)) state.history[today].newWords.push(item.word);
     await saveState();
-    return { days, previous };
+    return { days: 1, previous };
   }
 
   async function answerToday(answer) {
@@ -484,13 +528,15 @@
     const item = currentWord;
     const previous = state.progress[item.word] ? { ...state.progress[item.word] } : null;
     const previousDayAnswer = getTodayAnswers()[item.word];
-    undoSnapshot = { word: item.word, previous, previousDayAnswer };
-    const result = await recordAnswer(item, answer, "today");
+    const wasTodayNew = state.history[todayKey()]?.newWords?.includes(item.word) || false;
+    undoSnapshot = { word: item.word, previous, previousDayAnswer, wasTodayNew };
+    const result = await recordLearning(item, answer, currentKind === "other" ? "manual" : "today");
     revealed = true;
     byId("today-card").classList.add("revealed");
     byId("card-prompt").textContent = answer === "known" ? "已经记下你的“认识”" : "已经记下你的“不认识”";
     byId("card-gloss").textContent = item.gloss;
     byId("translation").hidden = false;
+    byId("study-synonyms-button").hidden = false;
     byId("card-hint").textContent = `下次复习：${result.days} 天后`;
     byId("answer-actions").hidden = true;
     byId("reveal-actions").hidden = false;
@@ -507,14 +553,17 @@
     if (!undoSnapshot || !currentWord || undoSnapshot.word !== currentWord.word) return;
     if (undoSnapshot.previous) state.progress[currentWord.word] = undoSnapshot.previous;
     else delete state.progress[currentWord.word];
-    if (undoSnapshot.previousDayAnswer) getTodayAnswers()[currentWord.word] = undoSnapshot.previousDayAnswer;
+    if (undoSnapshot.previousDayAnswer !== undefined) getTodayAnswers()[currentWord.word] = undoSnapshot.previousDayAnswer;
     else delete getTodayAnswers()[currentWord.word];
+    if (!undoSnapshot.wasTodayNew) state.history[todayKey()].newWords = state.history[todayKey()].newWords.filter((word) => word !== currentWord.word);
     await saveState();
     revealed = false;
     undoSnapshot = null;
     byId("today-card").classList.remove("revealed");
     byId("card-prompt").textContent = "先看英文，再选择";
     byId("translation").hidden = true;
+    byId("study-synonyms-button").hidden = true;
+    byId("study-synonyms").hidden = true;
     byId("card-hint").textContent = "想好了吗？按下你的判断。";
     byId("answer-actions").hidden = false;
     byId("reveal-actions").hidden = true;
@@ -529,24 +578,40 @@
       if (active) tab.setAttribute("aria-current", "page");
       else tab.removeAttribute("aria-current");
     });
-    for (const panel of ["today", "catalog", "mistakes", "settings"]) {
+    for (const panel of ["today", "review", "free", "catalog", "mistakes", "synonyms", "settings"]) {
       byId(`${panel}-panel`).classList.toggle("active", panel === name);
     }
+    byId("app-shell").classList.toggle("focus-mode", name === "today" || name === "review");
     if (name === "mistakes") renderMistakes();
     if (name === "catalog") renderCatalog();
+    if (name === "free") renderFreeLists();
+    if (name === "synonyms") renderSynonymList();
+    if (name === "review") {
+      const remaining = Math.max(0, state.dailyGoal - Object.keys(getTodayAnswers()).length);
+      if (!quiz && dueWords().length && remaining) startQuiz("system", dueWords().slice(0, remaining), "today");
+      else renderQuiz();
+    }
     if (name === "today" && !revealed) renderToday();
   }
 
   function populateCatalogControls() {
     const unitSelect = byId("unit-select");
     unitSelect.replaceChildren();
-    const totalUnits = Math.ceil(words.length / 100);
+    const totalUnits = Math.ceil(activeCount / 100);
     for (let number = 1; number <= totalUnits; number++) {
       const option = document.createElement("option");
       option.value = String(number);
       option.textContent = `Unit ${number}`;
       unitSelect.append(option);
     }
+    if (activeCount < words.length) {
+      const other = document.createElement("option");
+      other.value = "other";
+      other.textContent = `Other (${words.length - activeCount})`;
+      unitSelect.append(other);
+    }
+    if (selectedUnit === "other" && activeCount === words.length) selectedUnit = 1;
+    if (selectedUnit !== "other" && Number(selectedUnit) > totalUnits) selectedUnit = totalUnits || "other";
     unitSelect.value = String(selectedUnit);
     populateListOptions();
   }
@@ -554,14 +619,16 @@
   function populateListOptions() {
     const listSelect = byId("list-select");
     listSelect.replaceChildren();
-    const listsInUnit = Math.min(10, Math.ceil((words.length - (selectedUnit - 1) * 100) / 10));
+    const listsInUnit = selectedUnit === "other"
+      ? Math.ceil((words.length - activeCount) / 10)
+      : Math.min(10, Math.ceil((activeCount - (Number(selectedUnit) - 1) * 100) / 10));
     for (let number = 1; number <= listsInUnit; number++) {
       const option = document.createElement("option");
       option.value = String(number);
       option.textContent = `List ${number}`;
       listSelect.append(option);
     }
-    selectedList = Math.min(selectedList, listsInUnit);
+    selectedList = Math.max(1, Math.min(selectedList, listsInUnit));
     listSelect.value = String(selectedList);
   }
 
@@ -583,10 +650,10 @@
       byId("catalog-prev").disabled = catalogPage === 0;
       byId("catalog-next").disabled = (catalogPage + 1) * 10 >= total;
     } else {
-      const start = (selectedUnit - 1) * 100 + (selectedList - 1) * 10;
+      const start = (selectedUnit === "other" ? activeCount : (Number(selectedUnit) - 1) * 100) + (selectedList - 1) * 10;
       items = state.deckOrder.slice(start, start + 10).map((word) => wordMap.get(word));
       total = items.length;
-      byId("catalog-title").textContent = `Unit ${selectedUnit} · List ${selectedList}`;
+      byId("catalog-title").textContent = `${selectedUnit === "other" ? "Other" : `Unit ${selectedUnit}`} · List ${selectedList}`;
       byId("catalog-count").textContent = `${total} 词`;
       byId("catalog-pagination").hidden = true;
     }
@@ -601,7 +668,9 @@
     }
     for (const item of items) {
       const entry = state.progress[item.word] || {};
-      const count = (Number(entry.knownCount) || 0) + (Number(entry.wrongCount) || 0);
+      const count = entry.studyCount !== undefined || entry.reviewCount !== undefined
+        ? (Number(entry.studyCount) || 0) + (Number(entry.reviewCount) || 0)
+        : (Number(entry.knownCount) || 0) + (Number(entry.wrongCount) || 0);
       const location = wordLocation(item.word);
       const row = document.createElement("article");
       row.className = "catalog-item";
@@ -612,35 +681,95 @@
       const gloss = document.createElement("p");
       gloss.textContent = item.gloss;
       const detail = document.createElement("small");
-      detail.textContent = `Unit ${location.unit} · List ${location.list} · ${item.difficulty}/${item.level} · ${item.polarity}`;
+      detail.textContent = `${location.other ? "Other" : `Unit ${location.unit}`} · List ${location.list} · ${item.difficulty}/${item.level} · ${item.polarity}`;
       main.append(word, gloss, detail);
       const stats = document.createElement("div");
       stats.className = "catalog-stats";
       const studied = document.createElement("b");
       studied.textContent = `${count} 次`;
       const wrong = document.createElement("span");
-      wrong.textContent = `不认识 ${Number(entry.wrongCount) || 0} 次`;
+      wrong.textContent = entry.unmastered && !entry.wrongCount ? "未掌握" : `复习错 ${Number(entry.wrongCount) || 0} 次`;
       stats.append(studied, wrong);
+      if (location.other) {
+        const learn = document.createElement("button");
+        learn.type = "button";
+        learn.className = "catalog-learn";
+        learn.textContent = "手动学习";
+        learn.addEventListener("click", () => {
+          manualWord = item;
+          switchTab("today");
+          renderToday();
+        });
+        stats.append(learn);
+      }
       row.append(main, stats);
       list.append(row);
     }
   }
 
   function sortedMistakes() {
-    return words.filter((item) => Number(state.progress[item.word]?.wrongCount) > 0)
-      .sort((a, b) => state.progress[b.word].wrongCount - state.progress[a.word].wrongCount || a.word.localeCompare(b.word));
+    return words.filter((item) => Number(state.progress[item.word]?.wrongCount) > 0 || state.progress[item.word]?.unmastered)
+      .sort((a, b) => (Number(state.progress[b.word].wrongCount) || 0) - (Number(state.progress[a.word].wrongCount) || 0) || a.word.localeCompare(b.word));
+  }
+
+  function mistakeGroup(item) {
+    const count = Number(state.progress[item.word]?.wrongCount) || 0;
+    return count > 0 ? `count:${count}` : "unmastered";
+  }
+
+  function groupName(key) {
+    return key === "unmastered" ? "未掌握" : `复习错 ${key.split(":")[1]} 次`;
+  }
+
+  function applyReviewFilters(items, prefix) {
+    const difficulty = byId(`${prefix}-difficulty`).value;
+    const polarity = byId(`${prefix}-polarity`).value;
+    return items.filter((item) =>
+      (difficulty === "全部" || item.difficulty === difficulty) &&
+      (polarity === "全部" || item.polarity === polarity)
+    );
   }
 
   function renderMistakes() {
     const mistakes = sortedMistakes();
     const query = byId("mistake-search").value.trim().toLocaleLowerCase();
-    const filtered = query
-      ? mistakes.filter((item) => item.word.toLocaleLowerCase().includes(query) || item.gloss.includes(query))
-      : mistakes;
+    const keys = ["unmastered", ...[...new Set(mistakes.map(mistakeGroup).filter((key) => key !== "unmastered"))].sort((a, b) => Number(a.split(":")[1]) - Number(b.split(":")[1]))];
+    if (!keys.includes(selectedMistakeGroup)) selectedMistakeGroup = "unmastered";
+    const filtered = applyReviewFilters(mistakes.filter((item) => mistakeGroup(item) === selectedMistakeGroup), "mistake")
+      .filter((item) => !query || item.word.toLocaleLowerCase().includes(query) || item.gloss.includes(query));
     byId("mistake-summary").textContent = `${mistakes.length} 个单词`;
-    byId("practice-mistakes").disabled = mistakes.length === 0;
+    const groups = byId("mistake-groups");
+    groups.replaceChildren();
+    for (const key of keys) {
+      const count = mistakes.filter((item) => mistakeGroup(item) === key).length;
+      const card = document.createElement("div");
+      card.className = `mistake-group ${key === selectedMistakeGroup ? "selected" : ""}`;
+      const heading = document.createElement("strong");
+      heading.textContent = `${groupName(key)} · ${count} 词`;
+      const actions = document.createElement("div");
+      const view = document.createElement("button");
+      view.type = "button";
+      view.textContent = "查看";
+      view.addEventListener("click", () => { selectedMistakeGroup = key; renderMistakes(); });
+      const practice = document.createElement("button");
+      practice.type = "button";
+      practice.textContent = "复习此列表";
+      practice.disabled = !count;
+      practice.addEventListener("click", () => {
+        selectedMistakeGroup = key;
+        const candidates = applyReviewFilters(mistakes.filter((item) => mistakeGroup(item) === key), "mistake");
+        const listCount = Math.max(1, Number.parseInt(byId("mistake-quantity").value, 10) || 1);
+        const limit = byId("mistake-all").checked ? candidates.length : listCount * 10;
+        startQuiz("mistake", candidates.slice(0, limit), "mistakes");
+      });
+      actions.append(view, practice);
+      card.append(heading, actions);
+      groups.append(card);
+    }
+    byId("mistake-list-title").textContent = groupName(selectedMistakeGroup);
+    byId("mistake-list-count").textContent = `${filtered.length} 词`;
     byId("mistake-empty").hidden = filtered.length > 0;
-    byId("mistake-empty").textContent = query ? "没有找到匹配的错词。" : "错题本还是空的，继续保持。";
+    byId("mistake-empty").textContent = query ? "没有找到匹配的错词。" : "这个列表暂时没有单词。";
     const list = byId("mistake-list");
     list.replaceChildren();
     for (const item of filtered) {
@@ -653,48 +782,233 @@
       title.textContent = item.word;
       gloss.textContent = item.gloss;
       count.className = "mistake-count";
-      count.textContent = `不认识 ${state.progress[item.word].wrongCount} 次`;
+      count.textContent = groupName(mistakeGroup(item));
       copy.append(title, gloss);
       row.append(copy, count);
       list.append(row);
     }
   }
 
-  function renderPractice() {
-    const item = practiceQueue[practiceIndex];
-    if (!item) {
-      byId("mistake-practice").hidden = true;
-      showToast("本轮错题复习完成");
-      renderMistakes();
-      return;
+  function shuffleItems(items) {
+    const result = [...items];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
     }
-    practiceRevealed = false;
-    byId("mistake-practice").hidden = false;
-    byId("practice-word").textContent = item.word;
-    byId("practice-gloss").hidden = true;
-    byId("practice-gloss").textContent = item.gloss;
-    byId("practice-actions").hidden = false;
-    byId("practice-next").hidden = true;
+    return result;
   }
 
-  async function answerPractice(answer) {
-    const item = practiceQueue[practiceIndex];
-    if (!item || practiceRevealed || answeringPractice) return;
-    answeringPractice = true;
-    byId("practice-known").disabled = true;
-    byId("practice-unknown").disabled = true;
-    try {
-    await recordAnswer(item, answer, "practice");
-    practiceRevealed = true;
-    byId("practice-gloss").hidden = false;
-    byId("practice-actions").hidden = true;
-    byId("practice-next").hidden = false;
+  function startQuiz(mode, items, returnTab) {
+    if (!items.length) { showToast("当前条件下没有可复习的单词"); return; }
+    quiz = { mode, words: shuffleItems(items), index: 0, phase: 0, wrongThisWord: 0,
+      answeredQuestions: 0, correctQuestions: 0, revealed: false, busy: false, options: null, returnTab };
+    switchTab("review");
+  }
+
+  function makeOptions(item, phase) {
+    const correct = phase === 0 ? item.gloss : item.word;
+    const choices = [correct];
+    const candidates = shuffleItems(words);
+    for (const candidate of candidates) {
+      const value = phase === 0 ? candidate.gloss : candidate.word;
+      if (candidate.word !== item.word && !choices.includes(value)) choices.push(value);
+      if (choices.length === 4) break;
+    }
+    return shuffleItems(choices);
+  }
+
+  function renderQuiz() {
+    const item = quiz?.words[quiz.index];
+    byId("quiz-card").hidden = !item;
+    byId("review-empty").hidden = Boolean(item);
+    if (!item) {
+      byId("review-empty-title").textContent = quiz ? "本轮复习完成" : "暂无进行中的复习";
+      byId("review-empty-text").textContent = quiz
+        ? `共完成 ${quiz.words.length} 个词、${quiz.answeredQuestions} 道题，答对 ${quiz.correctQuestions} 道。`
+        : "可以从今日单词、自由复习或错题本开始。";
+      byId("review-progress-text").textContent = quiz ? "100% 完成" : "尚未开始";
+      byId("review-progress-fill").style.width = quiz ? "100%" : "0%";
+      return;
+    }
+    byId("review-title").textContent = quiz.mode === "system" ? "系统复习" : quiz.mode === "mistake" ? "错题专项复习" : "自由复习";
+    byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.words.length} 词 · 第 ${quiz.phase + 1} / 2 题`;
+    byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / (quiz.words.length * 2) * 100)}%`;
+    byId("quiz-direction").textContent = quiz.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
+    byId("quiz-prompt").textContent = quiz.phase === 0 ? item.word : item.gloss;
+    if (!quiz.options) quiz.options = makeOptions(item, quiz.phase);
+    const options = byId("quiz-options");
+    options.replaceChildren();
+    for (const choice of quiz.options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = choice;
+      button.disabled = quiz.revealed;
+      button.addEventListener("click", () => answerQuiz(choice));
+      options.append(button);
+    }
+    byId("quiz-forgot").hidden = quiz.revealed;
+    byId("quiz-result").hidden = true;
+    byId("quiz-next").hidden = true;
+    byId("quiz-synonyms").hidden = true;
+  }
+
+  async function recordReview(item, wrong, mode) {
+    if (mode === "free") return;
+    const today = todayKey();
+    const previous = state.progress[item.word] || {};
+    const allCorrect = wrong === 0;
+    state.progress[item.word] = {
+      ...previous,
+      wrongCount: (Number(previous.wrongCount) || 0) + wrong,
+      knownCount: (Number(previous.knownCount) || 0) + (2 - wrong),
+      reviewCount: (Number(previous.reviewCount) || 0) + 1,
+      unmastered: false,
+      lastDate: today,
+      lastAnswer: allCorrect ? "known" : "unknown"
+    };
+    if (mode === "system") {
+      const stage = allCorrect ? Math.min((Number(previous.stage ?? -1)) + 1, INTERVALS.length - 1) : -1;
+      state.progress[item.word].stage = stage;
+      state.progress[item.word].dueDate = addDays(today, allCorrect ? INTERVALS[stage] : 1);
+      getTodayAnswers()[item.word] = allCorrect ? "review-known" : "review-unknown";
+    }
+    await saveState();
     renderOverview();
     renderMistakes();
+    renderFreeLists();
+  }
+
+  async function answerQuiz(choice) {
+    const item = quiz?.words[quiz.index];
+    if (!item || quiz.revealed || quiz.busy) return;
+    quiz.busy = true;
+    const correct = quiz.phase === 0 ? item.gloss : item.word;
+    const right = choice === correct;
+    quiz.revealed = true;
+    quiz.answeredQuestions++;
+    if (right) quiz.correctQuestions++;
+    else quiz.wrongThisWord++;
+    byId("quiz-options").querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+      if (button.textContent === correct) button.classList.add("correct");
+      else if (button.textContent === choice) button.classList.add("incorrect");
+    });
+    byId("quiz-forgot").hidden = true;
+    byId("quiz-result").hidden = false;
+    byId("quiz-result-title").textContent = right ? "回答正确" : choice === null ? "已标记不记得" : "回答错误";
+    byId("quiz-correct-pair").textContent = `${item.word} · ${item.gloss}`;
+    byId("quiz-next").textContent = quiz.phase === 0 ? "下一题 →" : quiz.index + 1 < quiz.words.length ? "下一个词 →" : "查看本轮结果 →";
+    try {
+      if (quiz.phase === 1) await recordReview(item, quiz.wrongThisWord, quiz.mode);
     } finally {
-      answeringPractice = false;
-      byId("practice-known").disabled = false;
-      byId("practice-unknown").disabled = false;
+      quiz.busy = false;
+      byId("quiz-next").hidden = false;
+    }
+  }
+
+  function nextQuizQuestion() {
+    if (!quiz || !quiz.revealed || quiz.busy) return;
+    if (quiz.phase === 0) quiz.phase = 1;
+    else { quiz.index++; quiz.phase = 0; quiz.wrongThisWord = 0; }
+    quiz.revealed = false;
+    quiz.options = null;
+    renderQuiz();
+  }
+
+  function finishQuiz() {
+    const returnTab = quiz?.returnTab || "today";
+    quiz = null;
+    switchTab(returnTab);
+  }
+
+  function listKey(word) {
+    const location = wordLocation(word);
+    return location.other
+      ? `other:${Math.floor((deckIndex.get(word) - activeCount) / 10) + 1}`
+      : `unit:${location.unit}:${location.list}`;
+  }
+
+  function listLabel(key) {
+    const parts = key.split(":");
+    return parts[0] === "other" ? `Other · List ${parts[1]}` : `Unit ${parts[1]} · List ${parts[2]}`;
+  }
+
+  function renderFreeLists() {
+    const learned = applyReviewFilters(words.filter((item) => state.progress[item.word]), "free");
+    const groups = new Map();
+    for (const item of learned) {
+      const key = listKey(item.word);
+      groups.set(key, (groups.get(key) || 0) + 1);
+    }
+    const validKeys = new Set(groups.keys());
+    selectedFreeLists = new Set([...selectedFreeLists].filter((key) => validKeys.has(key)));
+    const picker = byId("free-list-picker");
+    picker.replaceChildren();
+    if (!groups.size) {
+      const empty = document.createElement("p");
+      empty.className = "list-empty";
+      empty.textContent = "当前筛选下还没有学过的 List。";
+      picker.append(empty);
+    }
+    for (const [key, count] of groups) {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = key;
+      checkbox.checked = selectedFreeLists.has(key);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedFreeLists.add(key);
+        else selectedFreeLists.delete(key);
+        byId("free-selection-count").textContent = `已选择 ${selectedFreeLists.size} 个 List`;
+        byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
+      });
+      const text = document.createElement("span");
+      text.textContent = `${listLabel(key)} · 已学 ${count} 词`;
+      label.append(checkbox, text);
+      picker.append(label);
+    }
+    byId("free-selection-count").textContent = `已选择 ${selectedFreeLists.size} 个 List`;
+    byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
+    const todayWords = state.history[todayKey()]?.newWords || [];
+    byId("review-today-new").disabled = !applyReviewFilters(todayWords.map((word) => wordMap.get(word)).filter(Boolean), "free").length;
+  }
+
+  function showInlineSynonyms(word, containerId) {
+    const container = byId(containerId);
+    if (!container.hidden) { container.hidden = true; return; }
+    container.replaceChildren();
+    const matches = synonymMap[word] || [];
+    if (!matches.length) {
+      container.textContent = "当前词库中暂未匹配到近义词。";
+    } else {
+      for (const related of matches) {
+        const chip = document.createElement("span");
+        chip.textContent = `${related} · ${wordMap.get(related)?.gloss || ""}`;
+        container.append(chip);
+      }
+    }
+    container.hidden = false;
+  }
+
+  function renderSynonymList() {
+    const query = byId("synonym-search").value.trim().toLocaleLowerCase();
+    const matching = words.filter((item) => !query || item.word.toLocaleLowerCase().includes(query) || item.gloss.includes(query));
+    const pages = Math.max(1, Math.ceil(matching.length / 20));
+    synonymPage = Math.min(synonymPage, pages - 1);
+    byId("synonym-page").textContent = `${synonymPage + 1} / ${pages}`;
+    byId("synonym-prev").disabled = synonymPage === 0;
+    byId("synonym-next").disabled = synonymPage + 1 >= pages;
+    const list = byId("synonym-list");
+    list.replaceChildren();
+    for (const item of matching.slice(synonymPage * 20, synonymPage * 20 + 20)) {
+      const row = document.createElement("article");
+      const title = document.createElement("strong");
+      title.textContent = `${item.word} · ${item.gloss}`;
+      const related = document.createElement("p");
+      const matches = synonymMap[item.word] || [];
+      related.textContent = matches.length ? matches.map((word) => `${word}（${wordMap.get(word)?.gloss || ""}）`).join("、") : "词库中暂无匹配";
+      row.append(title, related);
+      list.append(row);
     }
   }
 
@@ -723,14 +1037,10 @@
       state = normalizeState(parsed.state);
       ensureDeckOrder();
       await saveState();
-      byId("difficulty-filter").value = state.difficultyFilter;
-      byId("polarity-filter").value = state.polarityFilter;
-      practiceQueue = [];
-      byId("mistake-practice").hidden = true;
-      renderToday();
-      renderMistakes();
-      populateCatalogControls();
-      renderCatalog();
+      quiz = null;
+      manualWord = null;
+      selectedFreeLists.clear();
+      renderAll();
       showToast("进度已导入");
     } catch (error) {
       console.error("Import failed.", error);
@@ -756,18 +1066,29 @@
     document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
     byId("known-button").addEventListener("click", () => answerToday("known"));
     byId("unknown-button").addEventListener("click", () => answerToday("unknown"));
-    byId("next-button").addEventListener("click", renderToday);
+    byId("next-button").addEventListener("click", () => { manualWord = null; renderToday(); });
     byId("undo-button").addEventListener("click", undoAnswer);
     byId("speak-button").addEventListener("click", speakWord);
-    byId("difficulty-filter").addEventListener("change", async (event) => {
-      state.difficultyFilter = event.target.value;
-      await saveState();
-      if (!revealed) renderToday();
+    byId("study-synonyms-button").addEventListener("click", () => { if (currentWord) showInlineSynonyms(currentWord.word, "study-synonyms"); });
+    byId("start-system-review").addEventListener("click", () => {
+      startQuiz("system", dueWords().slice(0, Math.max(0, state.dailyGoal - Object.keys(getTodayAnswers()).length)), "today");
     });
-    byId("polarity-filter").addEventListener("change", async (event) => {
-      state.polarityFilter = event.target.value;
-      await saveState();
-      if (!revealed) renderToday();
+    byId("quiz-forgot").addEventListener("click", () => answerQuiz(null));
+    byId("quiz-next").addEventListener("click", nextQuizQuestion);
+    byId("quiz-synonyms-button").addEventListener("click", () => {
+      const item = quiz?.words[quiz.index];
+      if (item) showInlineSynonyms(item.word, "quiz-synonyms");
+    });
+    byId("exit-review").addEventListener("click", finishQuiz);
+    byId("review-finish").addEventListener("click", finishQuiz);
+    for (const id of ["free-difficulty", "free-polarity"]) byId(id).addEventListener("change", renderFreeLists);
+    byId("review-today-new").addEventListener("click", () => {
+      const items = (state.history[todayKey()]?.newWords || []).map((word) => wordMap.get(word)).filter(Boolean);
+      startQuiz("free", applyReviewFilters(items, "free"), "free");
+    });
+    byId("review-selected-lists").addEventListener("click", () => {
+      const items = applyReviewFilters(words.filter((item) => state.progress[item.word] && selectedFreeLists.has(listKey(item.word))), "free");
+      startQuiz("free", items, "free");
     });
     byId("goal-form").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -781,8 +1102,23 @@
       renderToday();
       showToast(`已设置每天 ${value} list（${value * 10} 张）`);
     });
+    byId("difficulty-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const next = [...document.querySelectorAll('#difficulty-form input[name="difficulty"]:checked')].map((input) => input.value).sort();
+      if (!next.length) { showToast("请至少选择一种难度"); return; }
+      if (next.join("|") === [...state.preferredDifficulties].sort().join("|")) { showToast("难度偏好未变化"); return; }
+      state.preferredDifficulties = next;
+      ensureDeckOrder();
+      selectedUnit = 1;
+      selectedList = 1;
+      selectedFreeLists.clear();
+      manualWord = null;
+      await saveState();
+      renderAll();
+      showToast(`已重排 ${activeCount} 个计划词，其余 ${words.length - activeCount} 个在 Other`);
+    });
     byId("unit-select").addEventListener("change", (event) => {
-      selectedUnit = Number(event.target.value);
+      selectedUnit = event.target.value === "other" ? "other" : Number(event.target.value);
       selectedList = 1;
       populateListOptions();
       renderCatalog();
@@ -804,22 +1140,10 @@
       renderCatalog();
     });
     byId("mistake-search").addEventListener("input", renderMistakes);
-    byId("practice-mistakes").addEventListener("click", () => {
-      practiceQueue = sortedMistakes();
-      practiceIndex = 0;
-      renderPractice();
-      byId("mistake-practice").scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    byId("practice-known").addEventListener("click", () => answerPractice("known"));
-    byId("practice-unknown").addEventListener("click", () => answerPractice("unknown"));
-    byId("practice-next").addEventListener("click", () => {
-      practiceIndex += 1;
-      renderPractice();
-    });
-    byId("exit-practice").addEventListener("click", () => {
-      practiceQueue = [];
-      byId("mistake-practice").hidden = true;
-    });
+    for (const id of ["mistake-difficulty", "mistake-polarity"]) byId(id).addEventListener("change", renderMistakes);
+    byId("synonym-search").addEventListener("input", () => { synonymPage = 0; renderSynonymList(); });
+    byId("synonym-prev").addEventListener("click", () => { synonymPage = Math.max(0, synonymPage - 1); renderSynonymList(); });
+    byId("synonym-next").addEventListener("click", () => { synonymPage++; renderSynonymList(); });
     byId("export-button").addEventListener("click", exportProgress);
     byId("import-input").addEventListener("change", (event) => importProgress(event.target.files?.[0]));
     byId("sync-now").addEventListener("click", () => syncDirty ? pushSync() : connectSync());
@@ -909,27 +1233,43 @@
       }
       wordMap = new Map(words.map((item) => [item.word, item]));
       if (wordMap.size !== words.length) throw new Error("词库中存在重复单词");
+      const synonymResponse = await fetch("./synonyms.json");
+      if (!synonymResponse.ok) throw new Error(`近义词列表加载失败：${synonymResponse.status}`);
+      synonymMap = await synonymResponse.json();
     }
     if (db) db.close();
     state = await loadState();
     applyingCloud = true;
+    let rebuilt = false;
     try {
-      if (ensureDeckOrder()) await saveState();
+      rebuilt = ensureDeckOrder();
+      if (rebuilt) await saveState();
     } finally {
       applyingCloud = false;
     }
     syncRevision = Number(localStorage.getItem(userKey(SYNC_REV_STORE))) || 0;
     syncDirty = localStorage.getItem(userKey(SYNC_DIRTY_STORE)) === "1";
+    if (rebuilt) {
+      syncDirty = true;
+      localStorage.setItem(userKey(SYNC_DIRTY_STORE), "1");
+    }
     syncConflict = false;
     pendingCloud = null;
     byId("sync-choice").hidden = true;
-    practiceQueue = [];
-    byId("mistake-practice").hidden = true;
+    quiz = null;
+    manualWord = null;
+    selectedFreeLists.clear();
+    selectedUnit = 1;
+    selectedList = 1;
+    selectedMistakeGroup = "unmastered";
+    catalogPage = 0;
+    synonymPage = 0;
     if (!appBound) {
       bindEvents();
       appBound = true;
     }
     renderAll();
+    switchTab("today");
     byId("auth-screen").hidden = true;
     byId("app-shell").hidden = false;
     if (offline) syncStatus("当前离线，本机进度可继续使用；联网后点“立即同步”。", false);
