@@ -57,7 +57,7 @@
         <section class="overview" aria-label="学习进度">
           <div class="overview-top">
             <div>
-              <span class="section-kicker">今日进度</span>
+              <span class="section-kicker">今日新词</span>
               <div class="progress-number"><strong id="done-count">0</strong><span> / <span id="goal-display">2 list · 20 张</span></span></div>
             </div>
             <span class="progress-percent" id="progress-percent">0%</span>
@@ -141,6 +141,7 @@
           <div class="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
           <div class="quiz-card" id="quiz-card" hidden>
             <span class="quiz-direction" id="quiz-direction">英译中 · 第 1 题</span>
+            <span class="quiz-location" id="quiz-location"></span>
             <div class="quiz-prompt" id="quiz-prompt"></div>
             <div class="quiz-options" id="quiz-options"></div>
             <button type="button" class="dont-remember" id="quiz-forgot">不记得</button>
@@ -167,7 +168,7 @@
             </div>
             <span class="queue-note">3590 个单词</span>
           </div>
-          <p class="panel-description">偏好难度的单词全随机编入 Unit/List；其余单词单独放在 Other，只能手动学习。每 10 词为 1 List，每 10 List 为 1 Unit。</p>
+          <p class="panel-description">所选难度的已学词排在前面，未学词随机接续；学习、复习和此处共用同一 Unit/List。其余词在 Other，可手动学习。每 10 词为 1 List，每 10 List 为 1 Unit。</p>
           <div class="catalog-toolbar">
             <label>Unit <select id="unit-select" aria-label="选择 unit"></select></label>
             <label>List <select id="list-select" aria-label="选择 list"></select></label>
@@ -218,7 +219,7 @@
             </div>
           </div>
           <div class="setting-card">
-            <div><h3>每日背词数量</h3><p>1 list = 10 张词卡，10 list = 1 unit。最少设置 1 list；逾期词优先，未完成的顺延。</p></div>
+            <div><h3>每日背词数量</h3><p>每天分配所选数量的新词 List，1 list = 10 词，10 list = 1 unit；到期复习不占新词名额，未完成的 List 次日优先。</p></div>
             <form id="goal-form" class="goal-form">
               <input id="goal-input" type="number" min="1" max="359" step="1" inputmode="numeric" aria-label="每日背词 list 数量" required />
               <span>list / 天</span>
@@ -226,7 +227,7 @@
             </form>
           </div>
           <div class="setting-card">
-            <div><h3>学习难度偏好</h3><p>可多选。保存后，选中的词重新随机编入 Unit/List；其余进入 Other，不自动加入每日计划。至少选择一种。</p></div>
+            <div><h3>学习难度偏好</h3><p>可多选。保存后，已学词排在所选词库前面，未学词随机接续；其余进入 Other，不自动加入每日计划。至少选择一种。</p></div>
             <form id="difficulty-form" class="difficulty-form"><label><input type="checkbox" name="difficulty" value="易" /> 简单</label><label><input type="checkbox" name="difficulty" value="中" /> 中等</label><label><input type="checkbox" name="difficulty" value="难" /> 难</label><button type="submit">保存偏好</button></form>
           </div>
           <div class="setting-card">

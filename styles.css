@@ -267,6 +267,7 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .review-progress .progress-track div { background: var(--green); }
 .quiz-card { max-width: 680px; min-height: 430px; margin: 0 auto; padding: 28px; display: flex; flex-direction: column; align-items: stretch; border: 1px solid #dce5db; border-radius: 21px; background: #fff; box-shadow: 0 17px 39px #183f2b13; }
 .quiz-direction { color: #7da287; font-size: 12px; font-weight: 800; text-align: center; }
+.quiz-location { color: #a6b0a7; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-align: center; margin-top: 5px; }
 .quiz-prompt { min-height: 85px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--ink); font-size: clamp(26px, 6vw, 40px); font-family: Georgia,serif; line-height: 1.35; overflow-wrap: anywhere; }
 .quiz-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 14px 0; }
 .quiz-options button { min-height: 65px; padding: 10px 12px; border: 1px solid #dce7db; border-radius: 11px; color: #244b38; background: #f9fcf7; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }

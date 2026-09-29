@@ -358,7 +358,7 @@
   function ensureDeckOrder() {
     const preferences = new Set(state.preferredDifficulties);
     activeCount = words.filter((item) => preferences.has(item.difficulty)).length;
-    const signature = [...preferences].sort().join("|");
+    const signature = `v3:${[...preferences].sort().join("|")}`;
     const valid = Array.isArray(state.deckOrder) &&
       state.deckOrder.length === words.length &&
       new Set(state.deckOrder).size === words.length &&
@@ -373,9 +373,12 @@
         }
         return array;
       };
-      const preferred = shuffle(words.filter((item) => preferences.has(item.difficulty)).map((item) => item.word));
-      const other = shuffle(words.filter((item) => !preferences.has(item.difficulty)).map((item) => item.word));
-      state.deckOrder = preferred.concat(other);
+      const oldOrder = state.deckOrder.length === words.length && new Set(state.deckOrder).size === words.length && state.deckOrder.every((word) => wordMap.has(word))
+        ? state.deckOrder : words.map((item) => item.word);
+      const learned = oldOrder.filter((word) => wordMap.has(word) && state.progress[word]);
+      const unlearned = shuffle(words.map((item) => item.word).filter((word) => !state.progress[word]));
+      const preferred = (word) => preferences.has(wordMap.get(word).difficulty);
+      state.deckOrder = learned.filter(preferred).concat(unlearned.filter(preferred), learned.filter((word) => !preferred(word)), unlearned.filter((word) => !preferred(word)));
       state.orderSignature = signature;
     }
     deckIndex = new Map(state.deckOrder.map((word, index) => [word, index]));
@@ -423,32 +426,49 @@
     });
   }
 
+  function todayNewPlan() {
+    const answers = getTodayAnswers();
+    const day = state.history[todayKey()];
+    const signature = `${state.orderSignature}:${state.dailyGoal}`;
+    const candidates = state.deckOrder.slice(0, activeCount).filter((word) =>
+      !state.progress[word] || answers[word] === "known" || answers[word] === "unknown");
+    if (day.newPlanSignature !== signature || !Array.isArray(day.newPlanLists)) {
+      day.newPlanLists = [...new Set(candidates.map(listKey))].slice(0, state.dailyGoal / 10);
+      day.newPlanSignature = signature;
+    }
+    const assigned = new Set(day.newPlanLists);
+    const planned = candidates.filter((word) => assigned.has(listKey(word)));
+    const done = planned.filter((word) => answers[word] === "known" || answers[word] === "unknown").length;
+    return { words: planned, done };
+  }
+
   function pickNext() {
     if (manualWord) return { item: manualWord, kind: "other" };
-    if (Object.keys(getTodayAnswers()).length >= state.dailyGoal) return null;
     const due = dueWords();
     if (due.length) return { item: null, kind: "review" };
-    const fresh = newWords();
-    return fresh.length ? { item: fresh[0], kind: "new" } : null;
+    const next = todayNewPlan().words.find((word) => !state.progress[word]);
+    return next ? { item: wordMap.get(next), kind: "new" } : null;
   }
 
   function renderOverview() {
-    const done = Object.keys(getTodayAnswers()).length;
-    const goal = state.dailyGoal;
-    const percent = Math.min(100, Math.round(done / goal * 100));
+    const plan = todayNewPlan();
+    const done = plan.done;
+    const goal = plan.words.length;
+    const percent = goal ? Math.min(100, Math.round(done / goal * 100)) : 100;
+    const due = dueWords().length;
     const wrong = Object.values(state.progress).filter((entry) => Number(entry?.wrongCount) > 0 || entry?.unmastered).length;
     byId("done-count").textContent = done;
-    byId("goal-display").textContent = `${goal / 10} list · ${goal} 张`;
+    byId("goal-display").textContent = `${state.dailyGoal / 10} list · ${goal} 张`;
     byId("progress-percent").textContent = `${percent}%`;
     byId("progress-fill").style.width = `${percent}%`;
     byId("progress-track").setAttribute("aria-valuenow", String(percent));
-    byId("due-count").textContent = dueWords().length;
+    byId("due-count").textContent = due;
     byId("new-count").textContent = newWords().length;
     byId("wrong-count").textContent = wrong;
     byId("mistake-tab-count").textContent = wrong;
     byId("today-label").textContent = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
-    byId("queue-note").textContent = `待复习 ${dueWords().length} · 还可学 ${Math.max(0, goal - done)}`;
-    byId("goal-input").value = goal / 10;
+    byId("queue-note").textContent = `待复习 ${due} · 今日新词剩余 ${Math.max(0, goal - done)}`;
+    byId("goal-input").value = state.dailyGoal / 10;
     renderPlan();
   }
 
@@ -490,23 +510,24 @@
     undoSnapshot = null;
     const needsReview = choice?.kind === "review";
     byId("system-review-callout").hidden = !needsReview;
-    if (needsReview) byId("system-review-count").textContent = `${dueWords().length} 个单词到期，完成两题后计入今日进度`;
+    if (needsReview) byId("system-review-count").textContent = `${dueWords().length} 个单词到期，复习不占今日新词 List 名额`;
     byId("today-card-wrap").hidden = !currentWord;
     byId("today-empty").hidden = Boolean(currentWord) || needsReview;
     if (needsReview) return;
     if (!currentWord) {
-      const goalReached = Object.keys(getTodayAnswers()).length >= state.dailyGoal;
+      const plan = todayNewPlan();
+      const goalReached = plan.words.length > 0 && plan.done >= plan.words.length;
       byId("today-empty-title").textContent = goalReached ? "今天完成啦" : "偏好词库已经学完";
       byId("today-empty-text").textContent = goalReached
-        ? "你已完成今日计划。未完成的到期复习会留到明天，继续按顺序安排。"
+        ? "你已完成今日新词 List。未完成的词和到期复习会继续顺延。"
         : "可以到设置调整难度偏好，或到 Other 手动学习。";
       return;
     }
     byId("today-card").classList.remove("revealed");
     byId("card-kind").className = `card-kind ${currentKind === "new" ? "" : currentKind}`;
     byId("card-kind").textContent = currentKind === "other" ? "Other · 手动学习" : "今日新词";
-    const currentNumber = Object.keys(getTodayAnswers()).length + 1;
-    byId("card-index").textContent = currentKind === "other" ? "自由学习" : `${String(currentNumber).padStart(2, "0")} / ${state.dailyGoal}`;
+    const plan = todayNewPlan();
+    byId("card-index").textContent = currentKind === "other" ? "自由学习" : `${String(plan.done + 1).padStart(2, "0")} / ${plan.words.length}`;
     const location = wordLocation(currentWord.word);
     byId("card-location").textContent = `${location.other ? "OTHER" : `UNIT ${String(location.unit).padStart(2, "0")}`} · LIST ${String(location.list).padStart(2, "0")} · ${String(location.card).padStart(2, "0")}/10`;
     byId("card-prompt").textContent = "先看英文，再选择";
@@ -610,8 +631,7 @@
     if (name === "free") renderFreeLists();
     if (name === "synonyms") renderSynonymList();
     if (name === "review") {
-      const remaining = Math.max(0, state.dailyGoal - Object.keys(getTodayAnswers()).length);
-      if (!quiz && dueWords().length && remaining) startQuiz("system", dueWords().slice(0, remaining), "today");
+      if (!quiz && dueWords().length) startQuiz("system", dueWords(), "today");
       else renderQuiz();
     }
     if (name === "today" && !revealed) renderToday();
@@ -900,6 +920,8 @@
     byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.questions.length} 题`;
     byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / quiz.questions.length * 100)}%`;
     byId("quiz-direction").textContent = question.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
+    const location = wordLocation(question.item.word);
+    byId("quiz-location").textContent = `${location.other ? "OTHER" : `UNIT ${String(location.unit).padStart(2, "0")}`} · LIST ${String(location.list).padStart(2, "0")}`;
     byId("quiz-prompt").textContent = question.phase === 0 ? question.item.word : question.item.gloss;
     if (!quiz.options) quiz.options = makeOptions(question.item, question.phase);
     const options = byId("quiz-options");
@@ -1140,7 +1162,7 @@
     byId("speak-button").addEventListener("click", speakWord);
     byId("study-synonyms-button").addEventListener("click", () => { if (currentWord) showInlineSynonyms(currentWord.word, "study-synonyms"); });
     byId("start-system-review").addEventListener("click", () => {
-      startQuiz("system", dueWords().slice(0, Math.max(0, state.dailyGoal - Object.keys(getTodayAnswers()).length)), "today");
+      startQuiz("system", dueWords(), "today");
     });
     byId("quiz-forgot").addEventListener("click", () => answerQuiz(null));
     byId("quiz-next").addEventListener("click", nextQuizQuestion);
@@ -1169,7 +1191,7 @@
       state.dailyGoal = value * 10;
       await saveState();
       renderToday();
-      showToast(`已设置每天 ${value} list（${value * 10} 张）`);
+      showToast(`已设置每天安排 ${value} 个新词 List`);
     });
     byId("difficulty-form").addEventListener("submit", async (event) => {
       event.preventDefault();
