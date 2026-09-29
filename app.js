@@ -46,6 +46,7 @@
   let applyingCloud = false;
   let authGeneration = 0;
   let migrationRebuilt = false;
+  let feedbackAudioContext = null;
 
   function userKey(base) {
     return `${base}:${authUser.id}`;
@@ -820,10 +821,53 @@
     return result;
   }
 
+  function shuffleQuizQuestions(items) {
+    const questions = items.flatMap((item) => [{ item, phase: 0 }, { item, phase: 1 }]);
+    if (items.length < 2) return shuffleItems(questions);
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const shuffled = shuffleItems(questions);
+      if (shuffled.every((question, index) => index === 0 || question.item.word !== shuffled[index - 1].item.word)) {
+        return shuffled;
+      }
+    }
+    const first = shuffleItems(items);
+    const second = shuffleItems(items);
+    if (first[first.length - 1].word === second[0].word) [second[0], second[1]] = [second[1], second[0]];
+    return [...first.map((item) => ({ item, phase: 0 })), ...second.map((item) => ({ item, phase: 1 }))];
+  }
+
+  function playAnswerTone(correct) {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      feedbackAudioContext ||= new AudioContextClass();
+      if (feedbackAudioContext.state === "suspended") void feedbackAudioContext.resume().catch(() => {});
+      const now = feedbackAudioContext.currentTime;
+      const notes = correct ? [523.25, 659.25] : [392, 293.66];
+      notes.forEach((frequency, index) => {
+        const oscillator = feedbackAudioContext.createOscillator();
+        const gain = feedbackAudioContext.createGain();
+        const start = now + index * 0.11;
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.055, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+        oscillator.connect(gain).connect(feedbackAudioContext.destination);
+        oscillator.start(start);
+        oscillator.stop(start + 0.17);
+      });
+    } catch (error) {
+      // Audio is optional; an unavailable or blocked audio device must not interrupt review.
+    }
+  }
+
   function startQuiz(mode, items, returnTab) {
     if (!items.length) { showToast("当前条件下没有可复习的单词"); return; }
-    quiz = { mode, words: shuffleItems(items), index: 0, phase: 0, wrongThisWord: 0,
-      answeredQuestions: 0, correctQuestions: 0, revealed: false, busy: false, options: null, returnTab };
+    const quizWords = shuffleItems(items);
+    quiz = { mode, words: quizWords, questions: shuffleQuizQuestions(quizWords), index: 0,
+      wrongByWord: new Map(), completedByWord: new Map(), answeredQuestions: 0, correctQuestions: 0,
+      revealed: false, busy: false, options: null, returnTab };
     switchTab("review");
   }
 
@@ -840,10 +884,10 @@
   }
 
   function renderQuiz() {
-    const item = quiz?.words[quiz.index];
-    byId("quiz-card").hidden = !item;
-    byId("review-empty").hidden = Boolean(item);
-    if (!item) {
+    const question = quiz?.questions[quiz.index];
+    byId("quiz-card").hidden = !question;
+    byId("review-empty").hidden = Boolean(question);
+    if (!question) {
       byId("review-empty-title").textContent = quiz ? "本轮复习完成" : "暂无进行中的复习";
       byId("review-empty-text").textContent = quiz
         ? `共完成 ${quiz.words.length} 个词、${quiz.answeredQuestions} 道题，答对 ${quiz.correctQuestions} 道。`
@@ -853,11 +897,11 @@
       return;
     }
     byId("review-title").textContent = quiz.mode === "system" ? "系统复习" : quiz.mode === "mistake" ? "错题专项复习" : "自由复习";
-    byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.words.length} 词 · 第 ${quiz.phase + 1} / 2 题`;
-    byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / (quiz.words.length * 2) * 100)}%`;
-    byId("quiz-direction").textContent = quiz.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
-    byId("quiz-prompt").textContent = quiz.phase === 0 ? item.word : item.gloss;
-    if (!quiz.options) quiz.options = makeOptions(item, quiz.phase);
+    byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.questions.length} 题`;
+    byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / quiz.questions.length * 100)}%`;
+    byId("quiz-direction").textContent = question.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
+    byId("quiz-prompt").textContent = question.phase === 0 ? question.item.word : question.item.gloss;
+    if (!quiz.options) quiz.options = makeOptions(question.item, question.phase);
     const options = byId("quiz-options");
     options.replaceChildren();
     for (const choice of quiz.options) {
@@ -901,15 +945,19 @@
   }
 
   async function answerQuiz(choice) {
-    const item = quiz?.words[quiz.index];
-    if (!item || quiz.revealed || quiz.busy) return;
+    const question = quiz?.questions[quiz.index];
+    if (!question || quiz.revealed || quiz.busy) return;
+    const { item, phase } = question;
     quiz.busy = true;
-    const correct = quiz.phase === 0 ? item.gloss : item.word;
+    const correct = phase === 0 ? item.gloss : item.word;
     const right = choice === correct;
+    playAnswerTone(right);
     quiz.revealed = true;
     quiz.answeredQuestions++;
     if (right) quiz.correctQuestions++;
-    else quiz.wrongThisWord++;
+    else quiz.wrongByWord.set(item.word, (quiz.wrongByWord.get(item.word) || 0) + 1);
+    const completed = (quiz.completedByWord.get(item.word) || 0) + 1;
+    quiz.completedByWord.set(item.word, completed);
     byId("quiz-options").querySelectorAll("button").forEach((button) => {
       button.disabled = true;
       if (button.textContent === correct) button.classList.add("correct");
@@ -919,9 +967,9 @@
     byId("quiz-result").hidden = false;
     byId("quiz-result-title").textContent = right ? "回答正确" : choice === null ? "已标记不记得" : "回答错误";
     byId("quiz-correct-pair").textContent = `${item.word} · ${item.gloss}`;
-    byId("quiz-next").textContent = quiz.phase === 0 ? "下一题 →" : quiz.index + 1 < quiz.words.length ? "下一个词 →" : "查看本轮结果 →";
+    byId("quiz-next").textContent = quiz.index + 1 < quiz.questions.length ? "下一题 →" : "查看本轮结果 →";
     try {
-      if (quiz.phase === 1) await recordReview(item, quiz.wrongThisWord, quiz.mode);
+      if (completed === 2) await recordReview(item, quiz.wrongByWord.get(item.word) || 0, quiz.mode);
     } finally {
       quiz.busy = false;
       byId("quiz-next").hidden = false;
@@ -930,8 +978,7 @@
 
   function nextQuizQuestion() {
     if (!quiz || !quiz.revealed || quiz.busy) return;
-    if (quiz.phase === 0) quiz.phase = 1;
-    else { quiz.index++; quiz.phase = 0; quiz.wrongThisWord = 0; }
+    quiz.index++;
     quiz.revealed = false;
     quiz.options = null;
     renderQuiz();
@@ -1098,7 +1145,7 @@
     byId("quiz-forgot").addEventListener("click", () => answerQuiz(null));
     byId("quiz-next").addEventListener("click", nextQuizQuestion);
     byId("quiz-synonyms-button").addEventListener("click", () => {
-      const item = quiz?.words[quiz.index];
+      const item = quiz?.questions[quiz.index]?.item;
       if (item) showInlineSynonyms(item.word, "quiz-synonyms");
     });
     byId("exit-review").addEventListener("click", finishQuiz);
