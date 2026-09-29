@@ -45,6 +45,7 @@
   let pendingCloud = null;
   let applyingCloud = false;
   let authGeneration = 0;
+  let migrationRebuilt = false;
 
   function userKey(base) {
     return `${base}:${authUser.id}`;
@@ -209,6 +210,20 @@
       [...(value.preferredDifficulties || [])].sort().join("|") !== ["易", "中", "难"].sort().join("|");
   }
 
+  function sameLearningData(local, remote) {
+    const canonical = (input) => {
+      const value = normalizeState(input);
+      const ordered = (object) => Object.fromEntries(Object.entries(object || {}).sort(([a], [b]) => a.localeCompare(b)));
+      const progress = ordered(Object.fromEntries(Object.entries(value.progress).map(([word, entry]) => [word, ordered(entry)])));
+      const history = ordered(Object.fromEntries(Object.entries(value.history).map(([day, record]) => [day, {
+        answers: ordered(record?.answers),
+        newWords: (Array.isArray(record?.newWords) ? [...record.newWords] : []).sort()
+      }]).filter(([, record]) => Object.keys(record.answers).length || record.newWords.length)));
+      return JSON.stringify({ dailyGoal: value.dailyGoal, preferences: [...value.preferredDifficulties].sort(), progress, history });
+    };
+    return canonical(local) === canonical(remote);
+  }
+
   function renderAll() {
     document.querySelectorAll('#difficulty-form input[name="difficulty"]').forEach((input) => {
       input.checked = state.preferredDifficulties.includes(input.value);
@@ -238,6 +253,7 @@
     localStorage.removeItem(userKey(SYNC_DIRTY_STORE));
     syncDirty = false;
     syncConflict = false;
+    migrationRebuilt = false;
     pendingCloud = null;
     byId("sync-choice").hidden = true;
     renderAll();
@@ -269,6 +285,7 @@
       if (generation !== authGeneration) return;
       saved = true;
       syncRevision = result.revision;
+      migrationRebuilt = false;
       localStorage.setItem(userKey(SYNC_REV_STORE), String(syncRevision));
       if (JSON.stringify(state) === snapshot) {
         syncDirty = false;
@@ -310,12 +327,17 @@
     try {
       const record = await syncRequest("GET");
       if (generation !== authGeneration) return;
+      if (record.state && syncDirty && sameLearningData(state, record.state)) {
+        await useCloud(record);
+        return;
+      }
       if (!record.state) {
         syncRevision = 0;
         syncConflict = false;
         await pushSync();
       } else if (syncRevision === record.revision) {
-        if (!hasStudyData(state)) await useCloud(record);
+        if (migrationRebuilt && !syncDirty) await useCloud(record);
+        else if (!hasStudyData(state)) await useCloud(record);
         else if (syncDirty) await pushSync();
         else syncStatus(`已连接云端 · 版本 ${syncRevision}`);
       } else if (!hasStudyData(state)) {
@@ -1249,10 +1271,7 @@
     }
     syncRevision = Number(localStorage.getItem(userKey(SYNC_REV_STORE))) || 0;
     syncDirty = localStorage.getItem(userKey(SYNC_DIRTY_STORE)) === "1";
-    if (rebuilt) {
-      syncDirty = true;
-      localStorage.setItem(userKey(SYNC_DIRTY_STORE), "1");
-    }
+    migrationRebuilt = rebuilt;
     syncConflict = false;
     pendingCloud = null;
     byId("sync-choice").hidden = true;
