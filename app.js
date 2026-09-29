@@ -711,9 +711,7 @@
     }
     for (const item of items) {
       const entry = state.progress[item.word] || {};
-      const count = entry.studyCount !== undefined || entry.reviewCount !== undefined
-        ? (Number(entry.studyCount) || 0) + (Number(entry.reviewCount) || 0)
-        : (Number(entry.knownCount) || 0) + (Number(entry.wrongCount) || 0);
+      const count = (Number(entry.studyCount) || 0) + (Number(entry.reviewCount) || 0);
       const location = wordLocation(item.word);
       const row = document.createElement("article");
       row.className = "catalog-item";
@@ -729,7 +727,7 @@
       const stats = document.createElement("div");
       stats.className = "catalog-stats";
       const studied = document.createElement("b");
-      studied.textContent = `${count} 次`;
+      studied.textContent = count > 0 ? `${count} 次` : state.progress[item.word] ? "已学 · 旧记录" : "0 次";
       const wrong = document.createElement("span");
       wrong.textContent = entry.unmastered && !entry.wrongCount ? "未掌握" : `复习错 ${Number(entry.wrongCount) || 0} 次`;
       stats.append(studied, wrong);
