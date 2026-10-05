@@ -49,7 +49,7 @@
           <div class="hero-copy">
             <p class="eyebrow" id="today-label">TODAY'S PRACTICE</p>
             <h1 id="hero-title">每天记住一点，<br /><em>就会走得更远。</em></h1>
-            <p>先复习，再学新词。昨天没完成的，今天接着来。</p>
+            <p>按 List 安排今天的新词与复习，没完成的下次接着来。</p>
           </div>
           <div class="hero-decoration" aria-hidden="true">a<span>·</span>z</div>
         </section>
@@ -77,6 +77,7 @@
           <button class="tab" type="button" data-tab="catalog">全部词表</button>
           <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
           <button class="tab" type="button" data-tab="synonyms">近义词</button>
+          <button class="tab" type="button" data-tab="calendar">学习日历</button>
           <button class="tab" type="button" data-tab="settings">设置与备份</button>
         </nav>
 
@@ -84,15 +85,22 @@
           <div class="panel-intro">
             <div>
               <span class="section-kicker">DAILY DECK</span>
-              <h2>今天，从这一张开始</h2>
+              <h2>今日新词 List</h2>
             </div>
             <span class="queue-note" id="queue-note">准备中</span>
           </div>
 
+          <div class="task-picker" id="study-task-picker">
+            <p>勾选这次要背的 List。未完成的词下次仍可选择。</p>
+            <div class="task-list-picker" id="study-list-picker"></div>
+            <button type="button" class="primary-button" id="start-study-task">开始所选 List</button>
+          </div>
+          <div class="task-status" id="study-task-status" hidden><span id="study-task-status-text"></span><button type="button" class="quiet-button" id="end-study-task">结束本次任务</button></div>
+
           <div class="system-review-callout" id="system-review-callout" hidden>
             <strong id="system-review-count">有单词需要复习</strong>
-            <p>先完成到期复习，再继续今天的新词。</p>
-            <button type="button" id="start-system-review">开始系统复习</button>
+            <p>到期复习可按 List 分次完成。</p>
+            <button type="button" id="start-system-review">选择复习 List</button>
           </div>
 
           <div class="flashcard-wrap" id="today-card-wrap">
@@ -137,8 +145,9 @@
         </section>
 
         <section class="panel" id="review-panel">
-          <div class="panel-intro review-intro"><div><span class="section-kicker">RECALL TEST</span><h2 id="review-title">复习测验</h2></div><button type="button" class="quiet-button" id="exit-review">结束本轮</button></div>
-          <div class="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
+          <div class="panel-intro review-intro"><div><span class="section-kicker">RECALL TEST</span><h2 id="review-title">复习测验</h2></div><button type="button" class="quiet-button" id="exit-review" hidden>结束本轮</button></div>
+          <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button></div>
+          <div class="review-progress" id="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
           <div class="quiz-card" id="quiz-card" hidden>
             <span class="quiz-direction" id="quiz-direction">英译中 · 第 1 题</span>
             <span class="quiz-location" id="quiz-location"></span>
@@ -209,6 +218,15 @@
           <input id="synonym-search" class="wide-search" type="search" placeholder="搜索英文或中文释义" aria-label="搜索近义词" />
           <div id="synonym-list" class="synonym-list"></div>
           <div class="catalog-pagination" id="synonym-pagination"><button type="button" id="synonym-prev">上一页</button><span id="synonym-page"></span><button type="button" id="synonym-next">下一页</button></div>
+        </section>
+
+        <section class="panel" id="calendar-panel">
+          <div class="panel-intro"><div><span class="section-kicker">YOUR LEARNING DAYS</span><h2>学习日历</h2></div></div>
+          <p class="panel-description">查看每日新词计划、到期及积压复习，以及每次所选任务的完成情况。未来安排为当前进度的预计值。</p>
+          <div class="calendar-toolbar"><button type="button" id="calendar-prev" aria-label="上个月">←</button><strong id="calendar-month"></strong><button type="button" id="calendar-next" aria-label="下个月">→</button></div>
+          <div class="calendar-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+          <div class="calendar-detail" id="calendar-detail"></div>
         </section>
 
         <section class="panel" id="settings-panel">

@@ -251,6 +251,35 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .focus-mode .overview .progress-track { margin: 12px 0 13px; }
 .focus-mode .panel { padding-top: 20px; }
 .focus-mode #today-panel .panel-intro { display: none; }
+.task-picker { max-width: 680px; margin: 18px auto; padding: 20px; background: #fff; border: 1px solid #dce5db; border-radius: 16px; }
+.task-picker > p { margin: 0 0 14px; color: #788b7c; font-size: 13px; line-height: 1.6; }
+.task-list-picker { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; max-height: 310px; overflow: auto; margin-bottom: 15px; }
+.task-list-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px; border: 1px solid #e0e9df; border-radius: 10px; background: #f9fcf8; cursor: pointer; }
+.task-list-row input { flex: 0 0 auto; accent-color: var(--green); width: 17px; height: 17px; }
+.task-list-row span { min-width: 0; display: grid; gap: 3px; }
+.task-list-row strong { color: #345d42; font-size: 12px; }
+.task-list-row small { color: #8b9b8e; font-size: 11px; }
+.task-status { max-width: 680px; margin: 10px auto 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--green); font-size: 12px; font-weight: 700; }
+.task-status span { line-height: 1.5; }
+.calendar-toolbar { display: flex; justify-content: center; align-items: center; gap: 22px; margin: 24px 0 15px; }
+.calendar-toolbar button { border: 1px solid #dae5da; background: #fff; color: var(--green); border-radius: 9px; width: 38px; height: 36px; }
+.calendar-toolbar strong { min-width: 105px; text-align: center; }
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 5px; }
+.calendar-weekdays { color: #91a092; font-size: 11px; text-align: center; margin-bottom: 7px; }
+.calendar-day { min-height: 87px; min-width: 0; text-align: left; padding: 8px; border: 1px solid #dfe7dc; border-radius: 10px; background: #fff; color: #3d6449; }
+.calendar-day strong { display: block; font-size: 13px; margin-bottom: 5px; }
+.calendar-day small { display: block; color: #819384; font-size: 10px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calendar-day.today { background: #f0f8ed; border-color: #9acba2; }
+.calendar-day.selected { outline: 2px solid var(--green); outline-offset: -2px; }
+.calendar-detail { margin-top: 20px; border: 1px solid #dfe7dc; border-radius: 15px; background: #fff; padding: 20px; }
+.calendar-detail h3 { margin: 0 0 7px; font-size: 16px; }
+.calendar-detail h4 { margin: 20px 0 10px; font-size: 13px; }
+.calendar-detail p { margin: 0 0 12px; color: #778a7a; font-size: 12px; line-height: 1.6; }
+.calendar-session { display: grid; gap: 5px; padding: 12px 0; border-top: 1px solid #e9efe7; font-size: 12px; }
+.calendar-session strong { color: #315e40; }
+.calendar-session span, .calendar-session small { color: #87978b; line-height: 1.5; overflow-wrap: anywhere; }
+.calendar-words { display: flex; flex-wrap: wrap; gap: 7px; color: #87978b; font-size: 12px; }
+.calendar-words span { background: #f1f7ee; color: #4b7052; border-radius: 7px; padding: 6px 9px; }
 .focus-mode .flashcard-wrap { margin-top: 8px; }
 .system-review-callout { max-width: 680px; margin: 45px auto; padding: 35px 25px; text-align: center; border: 1px solid #dce5db; border-radius: 20px; background: #fff; }
 .system-review-callout strong { display: block; color: var(--green); font-size: 21px; }
@@ -305,6 +334,12 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .difficulty-form input { accent-color: var(--green); }
 .difficulty-form button { border: 0; border-radius: 8px; padding: 10px 13px; color: #fff; background: var(--green); font-size: 12px; font-weight: 800; }
 @media (max-width: 600px) {
+  .task-list-picker { grid-template-columns: 1fr; }
+  .calendar-grid, .calendar-weekdays { gap: 3px; }
+  .calendar-day { min-height: 78px; padding: 5px 4px; border-radius: 7px; }
+  .calendar-day small { font-size: 10px; }
+  .calendar-day strong { font-size: 12px; }
+  .calendar-detail { padding: 16px; }
   .app-shell.focus-mode { padding: 0 12px; }
   .focus-mode .overview { padding: 12px 16px 2px; }
   .focus-mode .tabs { margin-top: 10px; }
