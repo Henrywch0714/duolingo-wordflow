@@ -2,6 +2,7 @@
   "use strict";
 
   const INTERVALS = [1, 2, 4, 7, 15, 30];
+  const reviewLists = window.WordflowReviewLists;
   const DB_NAME = "wordflow-progress";
   const DB_STORE = "data";
   const STATE_KEY = "state";
@@ -59,12 +60,13 @@
 
   function defaultState() {
     return {
-      version: 3,
+      version: 4,
       dailyGoal: 20,
       deckOrder: [],
       preferredDifficulties: ["易", "中", "难"],
       orderSignature: "",
       progress: {},
+      listReviews: {},
       history: {},
       taskSessions: [],
       activeTask: null
@@ -149,10 +151,12 @@
         wrongCount: Math.max(0, Number(entry?.wrongCount) || 0),
         knownCount: Math.max(0, Number(entry?.knownCount) || 0),
         reviewCount: Math.max(0, Number(entry?.reviewCount) || 0),
+        systemReviewCount: Math.max(0, Math.floor(Number(entry?.systemReviewCount ?? entry?.reviewCount) || 0)),
         unmastered: Boolean(entry?.unmastered)
       }]));
     }
     if (input.history && typeof input.history === "object" && !Array.isArray(input.history)) base.history = input.history;
+    if (input.listReviews && typeof input.listReviews === "object" && !Array.isArray(input.listReviews)) base.listReviews = input.listReviews;
     if (Array.isArray(input.taskSessions)) base.taskSessions = input.taskSessions.filter((entry) =>
       entry && typeof entry === "object" && Array.isArray(entry.selectedWords) && Array.isArray(entry.completedWords) && Array.isArray(entry.listKeys));
     if (input.activeTask && typeof input.activeTask === "object" && Array.isArray(input.activeTask.selectedWords)) {
@@ -231,6 +235,8 @@
   function sameLearningData(local, remote) {
     const canonical = (input) => {
       const value = normalizeState(input);
+      const count = words.filter((item) => value.preferredDifficulties.includes(item.difficulty)).length;
+      reviewLists.ensureRecords(value, count, addDays(todayKey(), 1));
       const ordered = (object) => Object.fromEntries(Object.entries(object || {}).sort(([a], [b]) => a.localeCompare(b)));
       const progress = ordered(Object.fromEntries(Object.entries(value.progress).map(([word, entry]) => [word, ordered(entry)])));
       const history = ordered(Object.fromEntries(Object.entries(value.history).map(([day, record]) => [day, {
@@ -238,7 +244,7 @@
         newWords: (Array.isArray(record?.newWords) ? [...record.newWords] : []).sort()
       }]).filter(([, record]) => Object.keys(record.answers).length || record.newWords.length)));
       return JSON.stringify({ dailyGoal: value.dailyGoal, preferences: [...value.preferredDifficulties].sort(), progress, history,
-        taskSessions: value.taskSessions, activeTask: value.activeTask });
+        listReviews: ordered(value.listReviews), taskSessions: value.taskSessions, activeTask: value.activeTask });
     };
     return canonical(local) === canonical(remote);
   }
@@ -266,7 +272,7 @@
       rebuilt = ensureDeckOrder();
       quiz = null;
       if (taskTimedOut()) { finishTask("timed_out"); expiredTask = true; }
-      else restoreQuiz();
+      else rebuilt = restoreQuiz() || rebuilt;
       await saveState();
     } finally {
       if (generation === authGeneration) applyingCloud = false;
@@ -406,7 +412,8 @@
       state.orderSignature = signature;
     }
     deckIndex = new Map(state.deckOrder.map((word, index) => [word, index]));
-    return !valid;
+    const migratedLists = reviewLists.ensureRecords(state, activeCount, addDays(todayKey(), 1));
+    return !valid || migratedLists;
   }
 
   function wordLocation(word) {
@@ -430,16 +437,8 @@
   }
 
   function dueWords() {
-    const today = todayKey();
-    const answered = getTodayAnswers();
-    return state.deckOrder.slice(0, activeCount).map((word) => wordMap.get(word)).filter((item) => {
-      const progress = state.progress[item.word];
-      return progress && progress.dueDate && progress.dueDate <= today && !answered[item.word];
-    }).sort((a, b) => {
-      const pa = state.progress[a.word];
-      const pb = state.progress[b.word];
-      return pa.dueDate.localeCompare(pb.dueDate) || (pb.wrongCount || 0) - (pa.wrongCount || 0) || a.word.localeCompare(b.word);
-    });
+    return reviewLists.dueLists(state, activeCount, todayKey())
+      .flatMap((group) => group.words.map((word) => wordMap.get(word)));
   }
 
   function newWords() {
@@ -479,7 +478,9 @@
       id: task.id, type: task.type, date: task.date, startedAt: task.startedAt,
       endedAt: new Date().toISOString(), reason,
       listKeys: task.listKeys, selectedWords: task.selectedWords,
-      completedWords: task.selectedWords.filter((word) => completed.has(word))
+      completedWords: task.selectedWords.filter((word) => completed.has(word)),
+      ...(task.type === "system" && task.reviewPolicy === reviewLists.POLICY
+        ? { reviewPolicy: task.reviewPolicy, committedLists: task.committedLists || [] } : {})
     });
     state.activeTask = null;
     void saveState();
@@ -495,6 +496,11 @@
       type, date: todayKey(), startedAt: now, lastActivityAt: now,
       listKeys: [...listKeys], selectedWords: items.map((item) => item.word), completedWords: []
     };
+    if (type === "system") {
+      state.activeTask.reviewPolicy = reviewLists.POLICY;
+      state.activeTask.committedLists = [];
+      state.activeTask.listWords = Object.fromEntries([...taskGroups(items)].map(([key, entries]) => [key, entries.map((item) => item.word)]));
+    }
     void saveState();
     return true;
   }
@@ -539,7 +545,7 @@
         byId(buttonId).disabled = selected.size === 0;
       });
       const caption = document.createElement("span");
-      caption.innerHTML = `<strong>${listLabel(key)}</strong><small>${items.length} 个${kind === "study" ? "待学" : "待复习"}词</small>`;
+      caption.innerHTML = `<strong>${listLabel(key)}</strong><small>${items.length} 个${kind === "study" ? "待学" : "待复习"}词${kind === "study" ? "" : ` · 系统复习 ${listReviewCount(key)} 次`}</small>`;
       label.append(checkbox, caption);
       picker.append(label);
     }
@@ -581,11 +587,11 @@
   function renderPlan() {
     const today = todayKey();
     const dates = Array.from({ length: 7 }, (_, index) => addDays(today, index));
-    const scheduled = state.deckOrder.slice(0, activeCount).map((word) => state.progress[word]).filter(Boolean);
-    const counts = dates.map((date, index) => scheduled.filter((entry) => {
-      if (!entry?.dueDate) return false;
-      return index === 0 ? entry.dueDate <= today : entry.dueDate === date;
-    }).length);
+    const scheduled = reviewLists.groups(state.deckOrder, activeCount).filter((group) => state.listReviews[group.key]);
+    const counts = dates.map((date, index) => scheduled.reduce((sum, group) => {
+      const entry = state.listReviews[group.key];
+      return sum + ((index === 0 ? entry.dueDate <= today : entry.dueDate === date) ? group.words.length : 0);
+    }, 0));
     const maximum = Math.max(...counts, 1);
     const list = byId("plan-list");
     list.replaceChildren();
@@ -672,6 +678,7 @@
     if (source === "today") getTodayAnswers()[item.word] = answer;
     getTodayAnswers();
     if (!state.history[today].newWords.includes(item.word)) state.history[today].newWords.push(item.word);
+    reviewLists.ensureRecords(state, activeCount, addDays(today, 1), listKey(item.word));
     markTaskWord(item.word);
     await saveState();
     return { days: 1, previous };
@@ -722,6 +729,7 @@
       state.activeTask.completedWords = state.activeTask.completedWords.filter((word) => word !== currentWord.word);
       touchTask();
     }
+    reviewLists.ensureRecords(state, activeCount, addDays(todayKey(), 1));
     await saveState();
     revealed = false;
     undoSnapshot = null;
@@ -816,10 +824,11 @@
       byId("catalog-next").disabled = (catalogPage + 1) * 10 >= total;
     } else {
       const start = (selectedUnit === "other" ? activeCount : (Number(selectedUnit) - 1) * 100) + (selectedList - 1) * 10;
-      items = state.deckOrder.slice(start, start + 10).map((word) => wordMap.get(word));
+      items = state.deckOrder.slice(start, selectedUnit === "other" ? start + 10 : Math.min(start + 10, activeCount)).map((word) => wordMap.get(word));
       total = items.length;
       byId("catalog-title").textContent = `${selectedUnit === "other" ? "Other" : `Unit ${selectedUnit}`} · List ${selectedList}`;
-      byId("catalog-count").textContent = `${total} 词`;
+      const key = selectedUnit === "other" ? `other:${selectedList}` : `unit:${selectedUnit}:${selectedList}`;
+      byId("catalog-count").textContent = `${total} 词 · 系统复习 ${listReviewCount(key)} 次`;
       byId("catalog-pagination").hidden = true;
     }
     const list = byId("catalog-list");
@@ -1005,6 +1014,11 @@
   function startQuiz(mode, items, returnTab) {
     if (!items.length) { showToast("当前条件下没有可复习的单词"); return; }
     const keys = [...new Set(items.map((item) => listKey(item.word)))];
+    if (mode === "system") {
+      const eligible = new Map(reviewLists.dueLists(state, activeCount, todayKey()).map((group) => [group.key, group.words]));
+      if (keys.some((key) => !eligible.has(key))) { showToast("所选 List 已不在到期计划中，请重新选择"); return; }
+      items = keys.flatMap((key) => eligible.get(key).map((word) => wordMap.get(word)));
+    }
     if (!beginTask(mode, items, keys)) return;
     const quizWords = shuffleItems(items);
     quiz = { mode, words: quizWords, questions: shuffleQuizQuestions(quizWords), index: 0,
@@ -1028,6 +1042,10 @@
   }
 
   function restoreQuiz() {
+    if (state.activeTask?.type === "system" && state.activeTask.reviewPolicy !== reviewLists.POLICY) {
+      finishTask("ended");
+      return true;
+    }
     const saved = state.activeTask?.quiz;
     if (!saved || !Array.isArray(saved.questions)) return;
     quiz = {
@@ -1043,12 +1061,12 @@
     byId("review-task-picker").hidden = active;
     byId("exit-review").hidden = !active;
     if (active) return;
-    byId("review-title").textContent = "复习测验";
+    byId("review-title").textContent = "系统复习";
     const groups = taskGroups(dueWords());
     renderTaskPicker("review-list-picker", groups, selectedReviewLists, "start-review-task", "review");
     byId("review-task-summary").textContent = groups.size
-      ? `${groups.size} 个 List、${[...groups.values()].reduce((sum, items) => sum + items.length, 0)} 个到期词；可分多次复习。`
-      : "暂无到期词。";
+      ? `${groups.size} 个 List、${[...groups.values()].reduce((sum, items) => sum + items.length, 0)} 个到期词。每个 List 全部题目完成后，才保存次数、复习日期和错题。`
+      : "暂无到期 List。整 List 的新词学完后才会加入系统复习。";
   }
 
   function makeOptions(item, phase) {
@@ -1080,7 +1098,8 @@
       return;
     }
     byId("review-title").textContent = quiz.mode === "system" ? "系统复习" : quiz.mode === "mistake" ? "错题专项复习" : "自由复习";
-    byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.questions.length} 题`;
+    const savedLists = state.activeTask?.committedLists?.length || 0;
+    byId("review-progress-text").textContent = `第 ${quiz.index + 1} / ${quiz.questions.length} 题${quiz.mode === "system" ? ` · 已存档 ${savedLists}/${state.activeTask?.listKeys.length || 0} List` : ""}`;
     byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / quiz.questions.length * 100)}%`;
     byId("quiz-direction").textContent = question.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
     const location = wordLocation(question.item.word);
@@ -1115,7 +1134,7 @@
   }
 
   async function recordReview(item, wrong, mode) {
-    if (mode === "free") return;
+    if (mode !== "mistake") return;
     const today = todayKey();
     const previous = state.progress[item.word] || {};
     const allCorrect = wrong === 0;
@@ -1128,12 +1147,6 @@
       lastDate: today,
       lastAnswer: allCorrect ? "known" : "unknown"
     };
-    if (mode === "system") {
-      const stage = allCorrect ? Math.min((Number(previous.stage ?? -1)) + 1, INTERVALS.length - 1) : -1;
-      state.progress[item.word].stage = stage;
-      state.progress[item.word].dueDate = addDays(today, allCorrect ? INTERVALS[stage] : 1);
-      getTodayAnswers()[item.word] = allCorrect ? "review-known" : "review-unknown";
-    }
     markTaskWord(item.word);
     await saveState();
     renderOverview();
@@ -1168,8 +1181,19 @@
     byId("quiz-next").textContent = quiz.index + 1 < quiz.questions.length ? "下一题 →" : "查看本轮结果 →";
     try {
       if (completed === 2) {
-        await recordReview(item, quiz.wrongByWord.get(item.word) || 0, quiz.mode);
-        markTaskWord(item.word);
+        if (quiz.mode === "system") {
+          const key = listKey(item.word);
+          const result = reviewLists.commitList(state, state.activeTask, quiz.completedByWord, quiz.wrongByWord, key, todayKey(), INTERVALS);
+          if (result) {
+            byId("quiz-result-title").textContent += ` · ${listLabel(key)} 已存档`;
+            renderOverview();
+            renderMistakes();
+            renderFreeLists();
+          }
+        } else {
+          await recordReview(item, quiz.wrongByWord.get(item.word) || 0, quiz.mode);
+          markTaskWord(item.word);
+        }
       }
       persistQuiz();
     } finally {
@@ -1207,6 +1231,13 @@
     return parts[0] === "other" ? `Other · List ${parts[1]}` : `Unit ${parts[1]} · List ${parts[2]}`;
   }
 
+  function listReviewCount(key) {
+    const record = state.listReviews[key];
+    if (record) return record.count;
+    const group = reviewLists.groups(state.deckOrder, activeCount, true).find((entry) => entry.key === key);
+    return reviewLists.minimumCount(state.progress, group?.words || []);
+  }
+
   function calendarInfo(date) {
     const today = todayKey();
     const record = state.history[date] || {};
@@ -1225,7 +1256,7 @@
     }
     const backlog = date === today ? dueWords().length : date < today
       ? (Number.isInteger(record.reviewBacklog) ? record.reviewBacklog : null)
-      : state.deckOrder.slice(0, activeCount).filter((word) => state.progress[word]?.dueDate && state.progress[word].dueDate <= date).length;
+      : reviewLists.dueLists(state, activeCount, date).reduce((sum, group) => sum + group.words.length, 0);
     return { planned, backlog, studied, newWords, sessions, forecast: date > today };
   }
 
@@ -1278,6 +1309,7 @@
       label.textContent = `${({ study: "新词", system: "系统复习", free: "自由复习", mistake: "错题复习" })[task.type] || "任务"} · ${(task.listKeys || []).map(listLabel).join("、")}`;
       const status = document.createElement("span");
       status.textContent = `完成 ${completed.size}/${(task.selectedWords || []).length} 词 · 未完成 ${missed.length} 词 · ${({ completed: "已完成", timed_out: "60 分钟无操作结束", ended: "手动结束", active: "进行中" })[task.reason] || "已结束"}`;
+      if (task.type === "system" && task.reviewPolicy === reviewLists.POLICY) status.textContent += ` · 已存档 ${(task.committedLists || []).length}/${task.listKeys.length} List；未完成 List 未记次／错题`;
       row.append(label, status);
       if (missed.length) {
         const missedText = document.createElement("small");
@@ -1329,7 +1361,7 @@
         byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
       });
       const text = document.createElement("span");
-      text.textContent = `${listLabel(key)} · 已学 ${count} 词`;
+      text.textContent = `${listLabel(key)} · 已学 ${count} 词 · 系统复习 ${listReviewCount(key)} 次`;
       label.append(checkbox, text);
       picker.append(label);
     }
@@ -1678,7 +1710,7 @@
     pendingCloud = null;
     byId("sync-choice").hidden = true;
     quiz = null;
-    restoreQuiz();
+    migrationRebuilt = restoreQuiz() || migrationRebuilt;
     manualWord = null;
     selectedFreeLists.clear();
     selectedUnit = 1;

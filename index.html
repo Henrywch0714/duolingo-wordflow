@@ -72,7 +72,7 @@
 
         <nav class="tabs" aria-label="学习页面">
           <button class="tab active" type="button" data-tab="today" aria-current="page">今日单词</button>
-          <button class="tab" type="button" data-tab="review">复习测验</button>
+          <button class="tab" type="button" data-tab="review">系统复习</button>
           <button class="tab" type="button" data-tab="free">自由复习</button>
           <button class="tab" type="button" data-tab="catalog">全部词表</button>
           <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
@@ -145,7 +145,7 @@
         </section>
 
         <section class="panel" id="review-panel">
-          <div class="panel-intro review-intro"><div><span class="section-kicker">RECALL TEST</span><h2 id="review-title">复习测验</h2></div><button type="button" class="quiet-button" id="exit-review" hidden>结束本轮</button></div>
+          <div class="panel-intro review-intro"><div><span class="section-kicker">SYSTEM REVIEW</span><h2 id="review-title">系统复习</h2></div><button type="button" class="quiet-button" id="exit-review" hidden>结束本轮</button></div>
           <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button></div>
           <div class="review-progress" id="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
           <div class="quiz-card" id="quiz-card" hidden>
@@ -177,7 +177,7 @@
             </div>
             <span class="queue-note">3590 个单词</span>
           </div>
-          <p class="panel-description">所选难度的已学词排在前面，未学词随机接续；学习、复习和此处共用同一 Unit/List。其余词在 Other，可手动学习。每 10 词为 1 List，每 10 List 为 1 Unit。</p>
+          <p class="panel-description">所选难度的已学词排在前面，未学词随机接续；学习、复习和此处共用同一 Unit/List。每 10 词为 1 List，最后一列按实际词数。显示整 List 系统复习次数；旧记录取词内最小次数。其余词在 Other，可手动学习。</p>
           <div class="catalog-toolbar">
             <label>Unit <select id="unit-select" aria-label="选择 unit"></select></label>
             <label>List <select id="list-select" aria-label="选择 list"></select></label>
@@ -249,7 +249,7 @@
             <form id="difficulty-form" class="difficulty-form"><label><input type="checkbox" name="difficulty" value="易" /> 简单</label><label><input type="checkbox" name="difficulty" value="中" /> 中等</label><label><input type="checkbox" name="difficulty" value="难" /> 难</label><button type="submit">保存偏好</button></form>
           </div>
           <div class="setting-card">
-            <div><h3>复习间隔</h3><p>答对后依次安排在 1、2、4、7、15、30 天后；答错则从短间隔重新开始。</p></div>
+            <div><h3>复习间隔</h3><p>系统复习按整 List 安排。全部题目答对后依次间隔 1、2、4、7、15、30 天；有答错则整 List 次日复习。完整做完一个 List 才保存次数与错题，中途停止的未完成 List 不记。</p></div>
             <div class="interval-row"><span>1 天</span><span>2 天</span><span>4 天</span><span>7 天</span><span>15 天</span><span>30 天</span></div>
           </div>
           <div class="setting-card plan-card">
@@ -282,6 +282,7 @@
       <footer>词间 · 每一个熟悉的词，都来自一次认真重逢。</footer>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./review-lists.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>
