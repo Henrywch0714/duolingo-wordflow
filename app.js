@@ -16,6 +16,7 @@
 
   let words = [];
   let synonymMap = {};
+  let nearformData = null;
   let wordMap = new Map();
   let deckIndex = new Map();
   let activeCount = 0;
@@ -27,7 +28,9 @@
   let quiz = null;
   let selectedMistakeGroup = "unmastered";
   let selectedFreeLists = new Set();
+  let freeListScope = "all";
   let synonymPage = 0;
+  let nearformPage = 0;
   let manualWord = null;
   let answeringToday = false;
   let db = null;
@@ -259,6 +262,7 @@
     renderMistakes();
     renderFreeLists();
     renderSynonymList();
+    renderNearformList();
     renderCalendar();
   }
 
@@ -526,12 +530,36 @@
     return groups;
   }
 
+  function setupListSelection(controlId, keys, selected, picker, updateCount) {
+    const control = byId(controlId);
+    const visible = new Set(keys);
+    const refresh = () => {
+      const count = [...visible].filter((key) => selected.has(key)).length;
+      control.disabled = visible.size === 0;
+      control.checked = visible.size > 0 && count === visible.size;
+      control.indeterminate = count > 0 && count < visible.size;
+      updateCount();
+    };
+    control.onchange = () => {
+      for (const key of visible) {
+        if (control.checked) selected.add(key);
+        else selected.delete(key);
+      }
+      picker.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = selected.has(input.value); });
+      refresh();
+    };
+    refresh();
+    return refresh;
+  }
+
   function renderTaskPicker(targetId, groups, selected, buttonId, kind) {
     const picker = byId(targetId);
     picker.replaceChildren();
     selected = new Set([...selected].filter((key) => groups.has(key)));
     if (kind === "study") selectedStudyLists = selected;
     else selectedReviewLists = selected;
+    const refreshSelection = setupListSelection(`${kind}-select-all`, groups.keys(), selected, picker,
+      () => { byId(buttonId).disabled = selected.size === 0; });
     for (const [key, items] of groups) {
       const label = document.createElement("label");
       label.className = "task-list-row";
@@ -542,7 +570,7 @@
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) selected.add(key);
         else selected.delete(key);
-        byId(buttonId).disabled = selected.size === 0;
+        refreshSelection();
       });
       const caption = document.createElement("span");
       caption.innerHTML = `<strong>${listLabel(key)}</strong><small>${items.length} 个${kind === "study" ? "待学" : "待复习"}词${kind === "study" ? "" : ` · 系统复习 ${listReviewCount(key)} 次`}</small>`;
@@ -655,6 +683,7 @@
     byId("card-gloss").textContent = "";
     byId("study-synonyms-button").hidden = true;
     byId("study-synonyms").hidden = true;
+    resetNearforms("study", true);
     byId("card-hint").textContent = "想好了吗？按下你的判断。";
     byId("answer-actions").hidden = false;
     byId("reveal-actions").hidden = true;
@@ -702,6 +731,7 @@
     byId("card-gloss").textContent = item.gloss;
     byId("translation").hidden = false;
     byId("study-synonyms-button").hidden = false;
+    resetNearforms("study", false);
     byId("card-hint").textContent = `下次复习：${result.days} 天后`;
     byId("answer-actions").hidden = true;
     byId("reveal-actions").hidden = false;
@@ -738,6 +768,7 @@
     byId("translation").hidden = true;
     byId("study-synonyms-button").hidden = true;
     byId("study-synonyms").hidden = true;
+    resetNearforms("study", true);
     byId("card-hint").textContent = "想好了吗？按下你的判断。";
     byId("answer-actions").hidden = false;
     byId("reveal-actions").hidden = true;
@@ -752,7 +783,7 @@
       if (active) tab.setAttribute("aria-current", "page");
       else tab.removeAttribute("aria-current");
     });
-    for (const panel of ["today", "review", "free", "catalog", "mistakes", "synonyms", "calendar", "settings"]) {
+    for (const panel of ["today", "review", "free", "catalog", "mistakes", "synonyms", "nearforms", "calendar", "settings"]) {
       byId(`${panel}-panel`).classList.toggle("active", panel === name);
     }
     byId("app-shell").classList.toggle("focus-mode", name === "today" || name === "review");
@@ -760,6 +791,7 @@
     if (name === "catalog") renderCatalog();
     if (name === "free") renderFreeLists();
     if (name === "synonyms") renderSynonymList();
+    if (name === "nearforms") renderNearformList();
     if (name === "calendar") renderCalendar();
     if (name === "review") {
       renderQuiz();
@@ -1131,6 +1163,7 @@
       byId("quiz-next").textContent = quiz.index + 1 < quiz.questions.length ? "下一题 →" : "查看本轮结果 →";
     }
     byId("quiz-synonyms").hidden = true;
+    resetNearforms("quiz", false);
   }
 
   async function recordReview(item, wrong, mode) {
@@ -1331,24 +1364,56 @@
     detail.append(wordsTitle, list);
   }
 
-  function renderFreeLists() {
+  function todayLearnedWords() {
+    return [...new Set(state.history[todayKey()]?.newWords || [])]
+      .filter((word) => state.progress[word] && wordMap.has(word)).map((word) => wordMap.get(word));
+  }
+
+  function freeListGroups() {
     const learned = applyReviewFilters(words.filter((item) => state.progress[item.word]), "free");
-    const groups = new Map();
-    for (const item of learned) {
-      const key = listKey(item.word);
-      groups.set(key, (groups.get(key) || 0) + 1);
+    const todayKeys = new Set(applyReviewFilters(todayLearnedWords(), "free").map((item) => listKey(item.word)));
+    const visible = freeListScope === "today" ? learned.filter((item) => todayKeys.has(listKey(item.word))) : learned;
+    return taskGroups(visible.sort((a, b) => deckIndex.get(a.word) - deckIndex.get(b.word)));
+  }
+
+  function setFreeListScope(scope) {
+    if (!["all", "today"].includes(scope)) return;
+    freeListScope = scope;
+    selectedFreeLists.clear();
+    renderFreeLists();
+  }
+
+  function startSelectedFreeLists() {
+    const items = [...freeListGroups()].filter(([key]) => selectedFreeLists.has(key)).flatMap(([, entries]) => entries);
+    startQuiz("free", items, "free");
+  }
+
+  function renderFreeLists() {
+    const groups = freeListGroups();
+    const todayWords = new Set(todayLearnedWords().map((item) => item.word));
+    for (const scope of ["all", "today"]) {
+      const button = byId(`free-scope-${scope}`);
+      button.classList.toggle("active", freeListScope === scope);
+      button.setAttribute("aria-pressed", String(freeListScope === scope));
     }
+    byId("free-scope-hint").textContent = freeListScope === "today"
+      ? "显示今天学过新词的 List；勾选后复习这些 List 中符合筛选的已学词。"
+      : "勾选 List 后，复习其中符合当前筛选的已学词。";
     const validKeys = new Set(groups.keys());
     selectedFreeLists = new Set([...selectedFreeLists].filter((key) => validKeys.has(key)));
     const picker = byId("free-list-picker");
     picker.replaceChildren();
+    const refreshSelection = setupListSelection("free-select-all", groups.keys(), selectedFreeLists, picker, () => {
+      byId("free-selection-count").textContent = `已选择 ${selectedFreeLists.size} / ${groups.size} 个 List`;
+      byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
+    });
     if (!groups.size) {
       const empty = document.createElement("p");
       empty.className = "list-empty";
-      empty.textContent = "当前筛选下还没有学过的 List。";
+      empty.textContent = freeListScope === "today" ? "当前筛选下暂无今日所学 List。" : "当前筛选下还没有学过的 List。";
       picker.append(empty);
     }
-    for (const [key, count] of groups) {
+    for (const [key, items] of groups) {
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -1357,18 +1422,18 @@
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) selectedFreeLists.add(key);
         else selectedFreeLists.delete(key);
-        byId("free-selection-count").textContent = `已选择 ${selectedFreeLists.size} 个 List`;
-        byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
+        refreshSelection();
       });
       const text = document.createElement("span");
-      text.textContent = `${listLabel(key)} · 已学 ${count} 词 · 系统复习 ${listReviewCount(key)} 次`;
+      const title = document.createElement("strong");
+      title.textContent = listLabel(key);
+      const detail = document.createElement("small");
+      detail.textContent = `可复习 ${items.length} 词 · 今日新学 ${items.filter((item) => todayWords.has(item.word)).length} 词 · 系统复习 ${listReviewCount(key)} 次`;
+      text.append(title, detail);
       label.append(checkbox, text);
       picker.append(label);
     }
-    byId("free-selection-count").textContent = `已选择 ${selectedFreeLists.size} 个 List`;
-    byId("review-selected-lists").disabled = selectedFreeLists.size === 0;
-    const todayWords = state.history[todayKey()]?.newWords || [];
-    byId("review-today-new").disabled = !applyReviewFilters(todayWords.map((word) => wordMap.get(word)).filter(Boolean), "free").length;
+    byId("review-today-new").disabled = !applyReviewFilters(todayLearnedWords(), "free").length;
   }
 
   function showInlineSynonyms(word, containerId) {
@@ -1407,6 +1472,125 @@
       related.textContent = matches.length ? matches.map((word) => `${word}（${wordMap.get(word)?.gloss || ""}）`).join("、") : "词库中暂无匹配";
       row.append(title, related);
       list.append(row);
+    }
+  }
+
+  function resetNearforms(prefix, hideButton) {
+    const button = byId(`${prefix}-nearforms-button`);
+    button.hidden = hideButton;
+    button.setAttribute("aria-expanded", "false");
+    byId(`${prefix}-nearforms`).hidden = true;
+  }
+
+  function highlightNearformWord(container, word, blocks, side) {
+    const equal = new Set();
+    for (const block of blocks) for (let i = block[side]; i < block[side] + block[2]; i++) equal.add(i);
+    for (let start = 0; start < word.length;) {
+      const same = equal.has(start);
+      let end = start + 1;
+      while (end < word.length && equal.has(end) === same) end++;
+      const piece = document.createElement(same ? "span" : "mark");
+      piece.textContent = word.slice(start, end);
+      container.append(piece);
+      start = end;
+    }
+  }
+
+  function nearformRow(word, match) {
+    const row = document.createElement("div");
+    row.className = "nearform-match";
+    const comparison = document.createElement("div");
+    comparison.className = "nearform-comparison";
+    const blocks = window.WordflowNearforms.matchingBlocks(word, match.word);
+    for (const [index, value] of [word, match.word].entries()) {
+      const cell = document.createElement("div");
+      const spelling = document.createElement("strong");
+      spelling.className = "nearform-spelling";
+      highlightNearformWord(spelling, value, blocks, index);
+      const audio = document.createElement("button");
+      audio.type = "button";
+      audio.className = "nearform-audio";
+      audio.textContent = "朗读";
+      audio.setAttribute("aria-label", `朗读 ${value}`);
+      audio.addEventListener("click", () => speakText(value));
+      cell.append(spelling, audio);
+      comparison.append(cell);
+    }
+    const gloss = document.createElement("div");
+    gloss.className = "nearform-gloss";
+    gloss.textContent = `${match.word} · ${wordMap.get(match.word)?.gloss || ""}`;
+    const reason = document.createElement("small");
+    reason.className = "nearform-reason";
+    reason.textContent = window.WordflowNearforms.reasonText(match);
+    const learned = document.createElement("small");
+    learned.className = "nearform-learned";
+    learned.textContent = state.progress[match.word] ? "已学" : "未学";
+    row.append(comparison, gloss, reason, learned);
+    return row;
+  }
+
+  function appendNearformMatches(container, word, matches, start = 0, limit = matches.length) {
+    for (const match of matches.slice(start, start + limit)) container.append(nearformRow(word, match));
+  }
+
+  function showInlineNearforms(word, prefix) {
+    const container = byId(`${prefix}-nearforms`);
+    const button = byId(`${prefix}-nearforms-button`);
+    const opening = container.hidden;
+    button.setAttribute("aria-expanded", String(opening));
+    container.hidden = !opening;
+    if (!opening) return;
+    container.replaceChildren();
+    if (!nearformData) { container.textContent = "近形词数据暂未加载，请联网后刷新重试。"; return; }
+    const matches = nearformData.matches[word] || [];
+    if (!matches.length) { container.textContent = "当前词库中暂无符合条件的近形词。"; return; }
+    appendNearformMatches(container, word, matches, 0, 5);
+    if (matches.length > 5) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "nearform-more";
+      more.textContent = `展开其余 ${matches.length - 5} 个近形词`;
+      more.addEventListener("click", () => { more.remove(); appendNearformMatches(container, word, matches, 5); });
+      container.append(more);
+    }
+  }
+
+  function renderNearformList() {
+    const list = byId("nearform-list");
+    list.replaceChildren();
+    byId("nearform-pagination").hidden = !nearformData;
+    byId("nearform-empty").hidden = true;
+    if (!nearformData) { byId("nearform-summary").textContent = "近形词数据暂未加载，请联网后刷新重试。"; return; }
+    const query = byId("nearform-search").value.trim().toLowerCase();
+    const matching = words.filter((item) => nearformData.matches[item.word]?.length &&
+      (!query || item.word.toLowerCase().includes(query) || item.gloss.includes(query)))
+      .sort((a, b) => a.word.localeCompare(b.word, "en"));
+    const pages = Math.max(1, Math.ceil(matching.length / 20));
+    nearformPage = Math.min(nearformPage, pages - 1);
+    byId("nearform-summary").textContent = `${nearformData.counts.words} 个词有匹配，共 ${nearformData.counts.pairs} 对近形词${query ? ` · 找到 ${matching.length} 个词` : ""}`;
+    byId("nearform-page").textContent = `${nearformPage + 1} / ${pages}`;
+    byId("nearform-prev").disabled = nearformPage === 0;
+    byId("nearform-next").disabled = nearformPage + 1 >= pages;
+    byId("nearform-pagination").hidden = matching.length === 0;
+    byId("nearform-empty").hidden = matching.length !== 0;
+    for (const item of matching.slice(nearformPage * 20, nearformPage * 20 + 20)) {
+      const article = document.createElement("article");
+      const title = document.createElement("h3");
+      title.textContent = item.word;
+      const gloss = document.createElement("p");
+      gloss.className = "nearform-base-gloss";
+      gloss.textContent = item.gloss;
+      const matches = nearformData.matches[item.word];
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `查看 ${matches.length} 个近形词`;
+      details.append(summary);
+      let loaded = false;
+      const fill = () => { if (!loaded) { appendNearformMatches(details, item.word, matches); loaded = true; } };
+      details.addEventListener("toggle", () => { if (details.open) fill(); });
+      if (matching.length === 1 || item.word.toLowerCase() === query) { fill(); details.open = true; }
+      article.append(title, gloss, details);
+      list.append(article);
     }
   }
 
@@ -1449,12 +1633,16 @@
   }
 
   function speakWord() {
-    if (!currentWord || !("speechSynthesis" in window)) {
+    speakText(currentWord?.word);
+  }
+
+  function speakText(word) {
+    if (!word || !("speechSynthesis" in window)) {
       showToast("当前浏览器不支持朗读");
       return;
     }
     speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(currentWord.word);
+    const utterance = new SpeechSynthesisUtterance(word);
     utterance.lang = "en-US";
     utterance.rate = 0.85;
     speechSynthesis.speak(utterance);
@@ -1511,6 +1699,7 @@
     byId("undo-button").addEventListener("click", undoAnswer);
     byId("speak-button").addEventListener("click", speakWord);
     byId("study-synonyms-button").addEventListener("click", () => { if (currentWord) showInlineSynonyms(currentWord.word, "study-synonyms"); });
+    byId("study-nearforms-button").addEventListener("click", () => { if (currentWord) showInlineNearforms(currentWord.word, "study"); });
     byId("start-system-review").addEventListener("click", () => {
       switchTab("review");
     });
@@ -1520,17 +1709,19 @@
       const item = quiz?.questions[quiz.index]?.item;
       if (item) showInlineSynonyms(item.word, "quiz-synonyms");
     });
+    byId("quiz-nearforms-button").addEventListener("click", () => {
+      const item = quiz?.questions[quiz.index]?.item;
+      if (item && quiz.revealed) showInlineNearforms(item.word, "quiz");
+    });
     byId("exit-review").addEventListener("click", finishQuiz);
     byId("review-finish").addEventListener("click", finishQuiz);
     for (const id of ["free-difficulty", "free-polarity"]) byId(id).addEventListener("change", renderFreeLists);
+    byId("free-scope-all").addEventListener("click", () => setFreeListScope("all"));
+    byId("free-scope-today").addEventListener("click", () => setFreeListScope("today"));
     byId("review-today-new").addEventListener("click", () => {
-      const items = (state.history[todayKey()]?.newWords || []).map((word) => wordMap.get(word)).filter(Boolean);
-      startQuiz("free", applyReviewFilters(items, "free"), "free");
+      startQuiz("free", applyReviewFilters(todayLearnedWords(), "free"), "free");
     });
-    byId("review-selected-lists").addEventListener("click", () => {
-      const items = applyReviewFilters(words.filter((item) => state.progress[item.word] && selectedFreeLists.has(listKey(item.word))), "free");
-      startQuiz("free", items, "free");
-    });
+    byId("review-selected-lists").addEventListener("click", startSelectedFreeLists);
     byId("goal-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const value = Number(byId("goal-input").value);
@@ -1586,6 +1777,9 @@
     byId("synonym-search").addEventListener("input", () => { synonymPage = 0; renderSynonymList(); });
     byId("synonym-prev").addEventListener("click", () => { synonymPage = Math.max(0, synonymPage - 1); renderSynonymList(); });
     byId("synonym-next").addEventListener("click", () => { synonymPage++; renderSynonymList(); });
+    byId("nearform-search").addEventListener("input", () => { nearformPage = 0; renderNearformList(); });
+    byId("nearform-prev").addEventListener("click", () => { nearformPage = Math.max(0, nearformPage - 1); renderNearformList(); });
+    byId("nearform-next").addEventListener("click", () => { nearformPage++; renderNearformList(); });
     byId("export-button").addEventListener("click", exportProgress);
     byId("import-input").addEventListener("change", (event) => importProgress(event.target.files?.[0]));
     byId("sync-now").addEventListener("click", () => syncDirty ? pushSync() : connectSync());
@@ -1687,6 +1881,15 @@
       if (!synonymResponse.ok) throw new Error(`近义词列表加载失败：${synonymResponse.status}`);
       synonymMap = await synonymResponse.json();
     }
+    if (!nearformData) {
+      try {
+        const response = await fetch("./nearforms.json");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.version !== 1 || data.wordCount !== words.length || !data.matches || !data.counts) throw new Error("Invalid nearform data");
+        nearformData = data;
+      } catch (error) { console.warn("Nearform data could not be loaded.", error); }
+    }
     if (db) db.close();
     state = await loadState();
     applyingCloud = true;
@@ -1713,11 +1916,13 @@
     migrationRebuilt = restoreQuiz() || migrationRebuilt;
     manualWord = null;
     selectedFreeLists.clear();
+    freeListScope = "all";
     selectedUnit = 1;
     selectedList = 1;
     selectedMistakeGroup = "unmastered";
     catalogPage = 0;
     synonymPage = 0;
+    nearformPage = 0;
     if (!appBound) {
       bindEvents();
       appBound = true;

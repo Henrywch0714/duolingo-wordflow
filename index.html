@@ -77,6 +77,7 @@
           <button class="tab" type="button" data-tab="catalog">全部词表</button>
           <button class="tab" type="button" data-tab="mistakes">错题本 <span id="mistake-tab-count">0</span></button>
           <button class="tab" type="button" data-tab="synonyms">近义词</button>
+          <button class="tab" type="button" data-tab="nearforms">近形词</button>
           <button class="tab" type="button" data-tab="calendar">学习日历</button>
           <button class="tab" type="button" data-tab="settings">设置与备份</button>
         </nav>
@@ -92,6 +93,7 @@
 
           <div class="task-picker" id="study-task-picker">
             <p>勾选这次要背的 List。未完成的词下次仍可选择。</p>
+            <label class="list-select-all"><input type="checkbox" id="study-select-all" /> 全选当前 List</label>
             <div class="task-list-picker" id="study-list-picker"></div>
             <button type="button" class="primary-button" id="start-study-task">开始所选 List</button>
           </div>
@@ -122,6 +124,8 @@
                 </div>
                 <button type="button" class="synonym-toggle" id="study-synonyms-button" hidden>查看近义词</button>
                 <div class="synonym-inline" id="study-synonyms" hidden></div>
+                <button type="button" class="synonym-toggle" id="study-nearforms-button" aria-expanded="false" aria-controls="study-nearforms" hidden>查看近形词</button>
+                <div class="nearform-inline" id="study-nearforms" hidden></div>
               </div>
               <div class="card-bottom">
                 <span class="card-swipe-hint" id="card-hint">想好了吗？按下你的判断。</span>
@@ -146,7 +150,7 @@
 
         <section class="panel" id="review-panel">
           <div class="panel-intro review-intro"><div><span class="section-kicker">SYSTEM REVIEW</span><h2 id="review-title">系统复习</h2></div><button type="button" class="quiet-button" id="exit-review" hidden>结束本轮</button></div>
-          <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button></div>
+          <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><label class="list-select-all"><input type="checkbox" id="review-select-all" /> 全选当前 List</label><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button></div>
           <div class="review-progress" id="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
           <div class="quiz-card" id="quiz-card" hidden>
             <span class="quiz-direction" id="quiz-direction">英译中 · 第 1 题</span>
@@ -154,7 +158,7 @@
             <div class="quiz-prompt" id="quiz-prompt"></div>
             <div class="quiz-options" id="quiz-options"></div>
             <button type="button" class="dont-remember" id="quiz-forgot">不记得</button>
-            <div class="quiz-result" id="quiz-result" hidden><strong id="quiz-result-title"></strong><p id="quiz-correct-pair"></p><button type="button" class="synonym-toggle" id="quiz-synonyms-button">查看近义词</button><div class="synonym-inline" id="quiz-synonyms" hidden></div></div>
+            <div class="quiz-result" id="quiz-result" hidden><strong id="quiz-result-title"></strong><p id="quiz-correct-pair"></p><button type="button" class="synonym-toggle" id="quiz-synonyms-button">查看近义词</button><div class="synonym-inline" id="quiz-synonyms" hidden></div><button type="button" class="synonym-toggle" id="quiz-nearforms-button" aria-expanded="false" aria-controls="quiz-nearforms">查看近形词</button><div class="nearform-inline" id="quiz-nearforms" hidden></div></div>
             <button type="button" class="primary-button" id="quiz-next" hidden>下一题 →</button>
           </div>
           <div class="empty-state" id="review-empty" hidden><h3 id="review-empty-title">本轮完成</h3><p id="review-empty-text"></p><button type="button" class="primary-button" id="review-finish">返回</button></div>
@@ -163,9 +167,12 @@
         <section class="panel" id="free-panel">
           <div class="panel-intro"><div><span class="section-kicker">PRACTICE YOUR WAY</span><h2>自由复习</h2></div></div>
           <p class="panel-description">从已学过的 List 多选，或复习今天学的新词。自由复习不会增加错次，也不会改变系统复习日期。</p>
+          <div class="free-list-scopes" role="group" aria-label="自由复习列表范围"><button type="button" id="free-scope-all" class="active" aria-pressed="true">全部已学 List</button><button type="button" id="free-scope-today" aria-pressed="false">今日所学 List</button></div>
           <div class="review-filters"><label>难度<select id="free-difficulty"><option value="全部">全部</option><option value="易">易</option><option value="中">中</option><option value="难">难</option></select></label><label>情感色彩<select id="free-polarity"><option value="全部">全部</option><option value="正向">正向</option><option value="负面">负面</option><option value="中性">中性</option></select></label></div>
           <div class="free-actions"><button type="button" class="primary-button" id="review-today-new">一键复习今日新词</button><button type="button" class="primary-button secondary" id="review-selected-lists">复习选中的 List</button></div>
           <p class="selection-hint" id="free-selection-count">已选择 0 个 List</p>
+          <p class="selection-hint" id="free-scope-hint"></p>
+          <label class="list-select-all"><input type="checkbox" id="free-select-all" /> 全选当前 List</label>
           <div class="free-list-picker" id="free-list-picker"></div>
         </section>
 
@@ -218,6 +225,16 @@
           <input id="synonym-search" class="wide-search" type="search" placeholder="搜索英文或中文释义" aria-label="搜索近义词" />
           <div id="synonym-list" class="synonym-list"></div>
           <div class="catalog-pagination" id="synonym-pagination"><button type="button" id="synonym-prev">上一页</button><span id="synonym-page"></span><button type="button" id="synonym-next">下一页</button></div>
+        </section>
+
+        <section class="panel" id="nearforms-panel">
+          <div class="panel-intro"><div><span class="section-kicker">SIMILAR SPELLINGS</span><h2>词库近形词</h2></div></div>
+          <p class="panel-description">高覆盖率、多段匹配、词族／词根词缀关系，以及编辑距离小的词，合并在同一个列表。展开可查看匹配原因与中文释义；浅色高亮表示拼写差异。词族关系参考 <a href="https://wordnet.princeton.edu/" target="_blank" rel="noopener noreferrer">WordNet</a>，请结合各词释义区分含义。</p>
+          <input id="nearform-search" class="wide-search" type="search" placeholder="搜索英文、中文或字母片段" aria-label="搜索近形词" />
+          <p id="nearform-summary" class="nearform-summary" aria-live="polite"></p>
+          <div id="nearform-list" class="nearform-list"></div>
+          <p id="nearform-empty" class="list-empty" hidden>当前没有匹配结果。</p>
+          <div class="catalog-pagination" id="nearform-pagination"><button type="button" id="nearform-prev">上一页</button><span id="nearform-page"></span><button type="button" id="nearform-next">下一页</button></div>
         </section>
 
         <section class="panel" id="calendar-panel">
@@ -283,6 +300,7 @@
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./review-lists.js" defer></script>
+    <script src="./nearforms.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

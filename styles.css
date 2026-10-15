@@ -311,8 +311,18 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .review-filters label, .mistake-tools label { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border: 1px solid #e1e7dc; border-radius: 9px; background: #fff; color: #667c6b; font-size: 12px; }
 .review-filters select, .mistake-tools select { border: 0; background: transparent; color: var(--ink); font-weight: 700; }
 .selection-hint { color: var(--muted); font-size: 12px; }
+.list-select-all { display: flex; width: fit-content; align-items: center; gap: 8px; min-height: 44px; margin: 4px 0 9px; color: #46614d; font-size: 12px; font-weight: 700; cursor: pointer; }
+.list-select-all input { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
+.list-select-all:has(input:disabled) { opacity: .5; cursor: default; }
+.free-list-scopes { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 18px; }
+.free-list-scopes button { min-height: 44px; padding: 8px 14px; border: 1px solid #dce7db; border-radius: 9px; background: #fff; color: #57715e; font-size: 12px; font-weight: 700; }
+.free-list-scopes button.active { background: #e8f2e6; color: var(--green); border-color: #95bc9a; }
 .free-list-picker { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 .free-list-picker label { display: flex; gap: 8px; align-items: center; border: 1px solid #e1e7dc; border-radius: 9px; background: #fff; padding: 12px; font-size: 12px; color: #46614d; }
+.free-list-picker label > input { flex: 0 0 auto; accent-color: var(--green); }
+.free-list-picker label > span { min-width: 0; line-height: 1.6; }
+.free-list-picker label strong, .free-list-picker label small { display: block; overflow-wrap: anywhere; }
+.free-list-picker label small { color: #7b8d7f; font-size: 11px; }
 .catalog-learn { border: 0; border-radius: 7px; padding: 6px 8px; background: #e9f2e7; color: var(--green); font-size: 11px; font-weight: 800; }
 .mistake-tools input[type="number"] { width: 55px; height: 32px; border: 0; text-align: center; }
 .mistake-tools input[type="checkbox"] { accent-color: var(--green); }
@@ -329,6 +339,27 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .synonym-list article { background: #fff; border: 1px solid #e1e7dc; border-radius: 10px; padding: 12px 15px; }
 .synonym-list strong { display: block; overflow-wrap: anywhere; }
 .synonym-list p { margin: 5px 0 0; color: #7b8d7f; font-size: 12px; line-height: 1.5; }
+.nearform-summary { color: #718775; font-size: 12px; line-height: 1.6; }
+.nearform-list { display: grid; gap: 10px; }
+.nearform-list > article { min-width: 0; padding: 15px; background: #fff; border: 1px solid #e1e7dc; border-radius: 12px; }
+.nearform-list h3 { margin: 0; color: var(--ink); font-size: 19px; overflow-wrap: anywhere; }
+.nearform-base-gloss { margin: 6px 0 9px; color: #6f8374; font-size: 13px; line-height: 1.6; }
+.nearform-list summary { cursor: pointer; padding: 10px 0; color: var(--green); font-size: 13px; font-weight: 700; min-height: 44px; }
+.nearform-inline { margin-top: 12px; max-height: 380px; overflow-y: auto; overscroll-behavior: contain; text-align: left; color: #718775; font-size: 13px; }
+.nearform-match { min-width: 0; padding: 13px 0; border-top: 1px solid #e4ece0; }
+.nearform-comparison { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.nearform-comparison > div { min-width: 0; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 7px; }
+.nearform-spelling { min-width: 0; color: #345f42; font-size: 17px; line-height: 1.65; overflow-wrap: anywhere; }
+.nearform-spelling mark { background: #f9e9b7; color: inherit; padding: 0; border-radius: 3px; }
+.nearform-audio { border: 0; border-radius: 7px; padding: 5px 8px; min-height: 40px; background: #edf5e9; color: var(--green); font-size: 11px; white-space: nowrap; }
+.nearform-gloss { margin-top: 7px; color: #4e6b55; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.nearform-reason, .nearform-learned { display: inline-block; margin: 6px 8px 0 0; color: #718775; font-size: 11px; line-height: 1.6; }
+.nearform-more { display: block; margin: 8px auto; min-height: 44px; border: 0; border-radius: 8px; padding: 8px 12px; background: #e8f2e6; color: var(--green); font-size: 12px; font-weight: 700; }
+@media (max-width: 600px) {
+  .nearform-list > article { padding: 13px; }
+  .nearform-comparison { gap: 9px; }
+  .nearform-spelling { font-size: 16px; }
+}
 .difficulty-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .difficulty-form label { color: #56745e; font-size: 12px; white-space: nowrap; }
 .difficulty-form input { accent-color: var(--green); }
