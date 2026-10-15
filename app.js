@@ -1482,57 +1482,6 @@
     byId(`${prefix}-nearforms`).hidden = true;
   }
 
-  function highlightNearformWord(container, word, blocks, side) {
-    const equal = new Set();
-    for (const block of blocks) for (let i = block[side]; i < block[side] + block[2]; i++) equal.add(i);
-    for (let start = 0; start < word.length;) {
-      const same = equal.has(start);
-      let end = start + 1;
-      while (end < word.length && equal.has(end) === same) end++;
-      const piece = document.createElement(same ? "span" : "mark");
-      piece.textContent = word.slice(start, end);
-      container.append(piece);
-      start = end;
-    }
-  }
-
-  function nearformRow(word, match) {
-    const row = document.createElement("div");
-    row.className = "nearform-match";
-    const comparison = document.createElement("div");
-    comparison.className = "nearform-comparison";
-    const blocks = window.WordflowNearforms.matchingBlocks(word, match.word);
-    for (const [index, value] of [word, match.word].entries()) {
-      const cell = document.createElement("div");
-      const spelling = document.createElement("strong");
-      spelling.className = "nearform-spelling";
-      highlightNearformWord(spelling, value, blocks, index);
-      const audio = document.createElement("button");
-      audio.type = "button";
-      audio.className = "nearform-audio";
-      audio.textContent = "朗读";
-      audio.setAttribute("aria-label", `朗读 ${value}`);
-      audio.addEventListener("click", () => speakText(value));
-      cell.append(spelling, audio);
-      comparison.append(cell);
-    }
-    const gloss = document.createElement("div");
-    gloss.className = "nearform-gloss";
-    gloss.textContent = `${match.word} · ${wordMap.get(match.word)?.gloss || ""}`;
-    const reason = document.createElement("small");
-    reason.className = "nearform-reason";
-    reason.textContent = window.WordflowNearforms.reasonText(match);
-    const learned = document.createElement("small");
-    learned.className = "nearform-learned";
-    learned.textContent = state.progress[match.word] ? "已学" : "未学";
-    row.append(comparison, gloss, reason, learned);
-    return row;
-  }
-
-  function appendNearformMatches(container, word, matches, start = 0, limit = matches.length) {
-    for (const match of matches.slice(start, start + limit)) container.append(nearformRow(word, match));
-  }
-
   function showInlineNearforms(word, prefix) {
     const container = byId(`${prefix}-nearforms`);
     const button = byId(`${prefix}-nearforms-button`);
@@ -1544,14 +1493,10 @@
     if (!nearformData) { container.textContent = "近形词数据暂未加载，请联网后刷新重试。"; return; }
     const matches = nearformData.matches[word] || [];
     if (!matches.length) { container.textContent = "当前词库中暂无符合条件的近形词。"; return; }
-    appendNearformMatches(container, word, matches, 0, 5);
-    if (matches.length > 5) {
-      const more = document.createElement("button");
-      more.type = "button";
-      more.className = "nearform-more";
-      more.textContent = `展开其余 ${matches.length - 5} 个近形词`;
-      more.addEventListener("click", () => { more.remove(); appendNearformMatches(container, word, matches, 5); });
-      container.append(more);
+    for (const match of matches) {
+      const chip = document.createElement("span");
+      chip.textContent = `${match.word} · ${wordMap.get(match.word)?.gloss || ""}`;
+      container.append(chip);
     }
   }
 
@@ -1560,6 +1505,7 @@
     list.replaceChildren();
     byId("nearform-pagination").hidden = !nearformData;
     byId("nearform-empty").hidden = true;
+    byId("nearform-summary").hidden = Boolean(nearformData);
     if (!nearformData) { byId("nearform-summary").textContent = "近形词数据暂未加载，请联网后刷新重试。"; return; }
     const query = byId("nearform-search").value.trim().toLowerCase();
     const matching = words.filter((item) => nearformData.matches[item.word]?.length &&
@@ -1567,7 +1513,6 @@
       .sort((a, b) => a.word.localeCompare(b.word, "en"));
     const pages = Math.max(1, Math.ceil(matching.length / 20));
     nearformPage = Math.min(nearformPage, pages - 1);
-    byId("nearform-summary").textContent = `${nearformData.counts.words} 个词有匹配，共 ${nearformData.counts.pairs} 对近形词${query ? ` · 找到 ${matching.length} 个词` : ""}`;
     byId("nearform-page").textContent = `${nearformPage + 1} / ${pages}`;
     byId("nearform-prev").disabled = nearformPage === 0;
     byId("nearform-next").disabled = nearformPage + 1 >= pages;
@@ -1575,21 +1520,12 @@
     byId("nearform-empty").hidden = matching.length !== 0;
     for (const item of matching.slice(nearformPage * 20, nearformPage * 20 + 20)) {
       const article = document.createElement("article");
-      const title = document.createElement("h3");
-      title.textContent = item.word;
-      const gloss = document.createElement("p");
-      gloss.className = "nearform-base-gloss";
-      gloss.textContent = item.gloss;
+      const title = document.createElement("strong");
+      title.textContent = `${item.word} · ${item.gloss}`;
+      const related = document.createElement("p");
       const matches = nearformData.matches[item.word];
-      const details = document.createElement("details");
-      const summary = document.createElement("summary");
-      summary.textContent = `查看 ${matches.length} 个近形词`;
-      details.append(summary);
-      let loaded = false;
-      const fill = () => { if (!loaded) { appendNearformMatches(details, item.word, matches); loaded = true; } };
-      details.addEventListener("toggle", () => { if (details.open) fill(); });
-      if (matching.length === 1 || item.word.toLowerCase() === query) { fill(); details.open = true; }
-      article.append(title, gloss, details);
+      related.textContent = matches.map((match) => `${match.word}（${wordMap.get(match.word)?.gloss || ""}）`).join("、");
+      article.append(title, related);
       list.append(article);
     }
   }

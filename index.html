@@ -125,7 +125,7 @@
                 <button type="button" class="synonym-toggle" id="study-synonyms-button" hidden>查看近义词</button>
                 <div class="synonym-inline" id="study-synonyms" hidden></div>
                 <button type="button" class="synonym-toggle" id="study-nearforms-button" aria-expanded="false" aria-controls="study-nearforms" hidden>查看近形词</button>
-                <div class="nearform-inline" id="study-nearforms" hidden></div>
+                <div class="synonym-inline" id="study-nearforms" hidden></div>
               </div>
               <div class="card-bottom">
                 <span class="card-swipe-hint" id="card-hint">想好了吗？按下你的判断。</span>
@@ -158,7 +158,7 @@
             <div class="quiz-prompt" id="quiz-prompt"></div>
             <div class="quiz-options" id="quiz-options"></div>
             <button type="button" class="dont-remember" id="quiz-forgot">不记得</button>
-            <div class="quiz-result" id="quiz-result" hidden><strong id="quiz-result-title"></strong><p id="quiz-correct-pair"></p><button type="button" class="synonym-toggle" id="quiz-synonyms-button">查看近义词</button><div class="synonym-inline" id="quiz-synonyms" hidden></div><button type="button" class="synonym-toggle" id="quiz-nearforms-button" aria-expanded="false" aria-controls="quiz-nearforms">查看近形词</button><div class="nearform-inline" id="quiz-nearforms" hidden></div></div>
+            <div class="quiz-result" id="quiz-result" hidden><strong id="quiz-result-title"></strong><p id="quiz-correct-pair"></p><button type="button" class="synonym-toggle" id="quiz-synonyms-button">查看近义词</button><div class="synonym-inline" id="quiz-synonyms" hidden></div><button type="button" class="synonym-toggle" id="quiz-nearforms-button" aria-expanded="false" aria-controls="quiz-nearforms">查看近形词</button><div class="synonym-inline" id="quiz-nearforms" hidden></div></div>
             <button type="button" class="primary-button" id="quiz-next" hidden>下一题 →</button>
           </div>
           <div class="empty-state" id="review-empty" hidden><h3 id="review-empty-title">本轮完成</h3><p id="review-empty-text"></p><button type="button" class="primary-button" id="review-finish">返回</button></div>
@@ -229,10 +229,9 @@
 
         <section class="panel" id="nearforms-panel">
           <div class="panel-intro"><div><span class="section-kicker">SIMILAR SPELLINGS</span><h2>词库近形词</h2></div></div>
-          <p class="panel-description">高覆盖率、多段匹配、词族／词根词缀关系，以及编辑距离小的词，合并在同一个列表。展开可查看匹配原因与中文释义；浅色高亮表示拼写差异。词族关系参考 <a href="https://wordnet.princeton.edu/" target="_blank" rel="noopener noreferrer">WordNet</a>，请结合各词释义区分含义。</p>
           <input id="nearform-search" class="wide-search" type="search" placeholder="搜索英文、中文或字母片段" aria-label="搜索近形词" />
-          <p id="nearform-summary" class="nearform-summary" aria-live="polite"></p>
-          <div id="nearform-list" class="nearform-list"></div>
+          <p id="nearform-summary" class="list-empty" aria-live="polite" hidden></p>
+          <div id="nearform-list" class="synonym-list"></div>
           <p id="nearform-empty" class="list-empty" hidden>当前没有匹配结果。</p>
           <div class="catalog-pagination" id="nearform-pagination"><button type="button" id="nearform-prev">上一页</button><span id="nearform-page"></span><button type="button" id="nearform-next">下一页</button></div>
         </section>
@@ -300,7 +299,6 @@
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./review-lists.js" defer></script>
-    <script src="./nearforms.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

@@ -26,8 +26,10 @@ function harness() {
   const instrumented = source.replace(/  init\(\);\s*\}\)\(\);\s*$/, `
     globalThis.app = { setup(entries, data) {
       words = entries; wordMap = new Map(words.map(item => [item.word, item]));
-      nearformData = data; state = defaultState(); state.progress.prize = {wrongCount: 3};
-    }, renderNearformList, showInlineNearforms, resetNearforms, nearformRow,
+      nearformData = data;
+      synonymMap = Object.fromEntries(Object.entries(data?.matches || {}).map(([word, matches]) => [word, matches.map(match => match.word)]));
+      state = defaultState(); state.progress.prize = {wrongCount: 3};
+    }, renderNearformList, showInlineNearforms, resetNearforms, renderSynonymList, showInlineSynonyms,
     snapshot: () => JSON.stringify(state) };
   })();`);
   assert.notEqual(instrumented, source);
@@ -36,18 +38,16 @@ function harness() {
   return { app: context.app, get: (id) => document.getElementById(id) };
 }
 
-test("looking up, opening and expanding nearforms never changes learning records", () => {
+test("looking up and opening nearforms never changes learning records", () => {
   const { app, get } = harness();
   const before = app.snapshot();
   get("nearform-search").value = "communication";
   app.renderNearformList();
   const article = get("nearform-list").children[0];
-  assert.equal(article.children[0].textContent, "communication");
-  assert.equal(article.children[2].open, true);
+  assert.equal(article.children[0].textContent, `communication · ${dictionary.find(item => item.word === "communication").gloss}`);
+  assert.equal(article.children.length, 2);
   app.showInlineNearforms("communication", "study");
   const inline = get("study-nearforms");
-  assert.equal(inline.children.length, 6);
-  inline.children[5].listeners.click();
   assert.equal(inline.children.length, data.matches.communication.length);
   assert.equal(get("study-nearforms-button").attributes["aria-expanded"], "true");
   app.resetNearforms("study", true);
@@ -56,19 +56,28 @@ test("looking up, opening and expanding nearforms never changes learning records
   assert.equal(app.snapshot(), before);
 });
 
-test("difference highlighting leaves matching single letters unchanged", () => {
-  const { app } = harness();
-  const row = app.nearformRow("price", data.matches.price.find((entry) => entry.word === "prize"));
-  const spellings = row.children[0].children.map((cell) => cell.children[0]);
-  assert.deepEqual(spellings.map((word) => word.children.filter((piece) => piece.tagName === "mark").map((piece) => piece.textContent).join("")), ["c", "z"]);
-  assert.equal(row.children[3].textContent, "已学");
+test("nearform page and both inline contexts use the same word-and-meaning format as synonyms", () => {
+  const { app, get } = harness();
+  get("nearform-search").value = get("synonym-search").value = "price";
+  app.renderNearformList();
+  app.renderSynonymList();
+  const row = get("nearform-list").children[0];
+  const synonymRow = get("synonym-list").children[0];
+  assert.deepEqual(row.children.map(child => [child.tagName, child.textContent]), synonymRow.children.map(child => [child.tagName, child.textContent]));
+  for (const prefix of ["study", "quiz"]) {
+    app.showInlineNearforms("price", prefix);
+    app.showInlineSynonyms("price", `${prefix}-synonyms`);
+    const chips = get(`${prefix}-nearforms`).children;
+    assert.deepEqual(chips.map(child => [child.tagName, child.textContent]), get(`${prefix}-synonyms`).children.map(child => [child.tagName, child.textContent]));
+    assert.ok(chips.every(child => child.tagName === "span" && child.children.length === 0));
+  }
 });
 
 test("search handles Chinese, no matches and missing offline data", () => {
   const { app, get } = harness();
   get("nearform-search").value = "奖品";
   app.renderNearformList();
-  assert.ok(get("nearform-list").children.some((article) => article.children[0].textContent === "prize"));
+  assert.ok(get("nearform-list").children.some((article) => article.children[0].textContent.startsWith("prize · ")));
   get("nearform-search").value = "no-such-word-987";
   app.renderNearformList();
   assert.equal(get("nearform-empty").hidden, false);

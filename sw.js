@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordflow-v11";
+const CACHE_NAME = "wordflow-v12";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -7,7 +7,6 @@ const APP_FILES = [
   "./review-lists.js",
   "./words.json",
   "./synonyms.json",
-  "./nearforms.js",
   "./nearforms.json",
   "./manifest.webmanifest",
   "./icon.svg",
