@@ -259,6 +259,13 @@ footer { text-align: center; color: #a1aa9f; font-size: 11px; padding: 58px 0 8p
 .task-list-row span { min-width: 0; display: grid; gap: 3px; }
 .task-list-row strong { color: #345d42; font-size: 12px; }
 .task-list-row small { color: #8b9b8e; font-size: 11px; }
+.review-list-section { grid-column: 1 / -1; margin: 10px 0 2px; color: #345d42; font-size: 13px; }
+.system-error-plan { margin-top: 18px; color: #718775; font-size: 12px; }
+.system-error-plan summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-weight: 700; }
+.system-error-plan > div { max-height: 320px; overflow-y: auto; }
+.error-plan-row { display: grid; gap: 5px; padding: 10px 0; border-top: 1px solid #e4ece0; line-height: 1.6; }
+.error-plan-row strong { color: #46614d; font-size: 12px; overflow-wrap: anywhere; }
+.error-plan-row small { color: #7b8d7f; font-size: 11px; }
 .task-status { max-width: 680px; margin: 10px auto 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--green); font-size: 12px; font-weight: 700; }
 .task-status span { line-height: 1.5; }
 .calendar-toolbar { display: flex; justify-content: center; align-items: center; gap: 22px; margin: 24px 0 15px; }

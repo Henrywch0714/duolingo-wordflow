@@ -150,7 +150,7 @@
 
         <section class="panel" id="review-panel">
           <div class="panel-intro review-intro"><div><span class="section-kicker">SYSTEM REVIEW</span><h2 id="review-title">系统复习</h2></div><button type="button" class="quiet-button" id="exit-review" hidden>结束本轮</button></div>
-          <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><label class="list-select-all"><input type="checkbox" id="review-select-all" /> 全选当前 List</label><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button></div>
+          <div class="task-picker" id="review-task-picker"><p id="review-task-summary"></p><label class="list-select-all"><input type="checkbox" id="review-select-all" /> 全选当前 List</label><div class="task-list-picker" id="review-list-picker"></div><button type="button" class="primary-button" id="start-review-task">开始所选 List</button><details id="system-error-plan" class="system-error-plan" hidden><summary id="system-error-plan-title">查看全部错词计划</summary><div id="system-error-plan-list"></div></details></div>
           <div class="review-progress" id="review-progress"><span id="review-progress-text">准备中</span><div class="progress-track"><div id="review-progress-fill"></div></div></div>
           <div class="quiz-card" id="quiz-card" hidden>
             <span class="quiz-direction" id="quiz-direction">英译中 · 第 1 题</span>
@@ -265,11 +265,11 @@
             <form id="difficulty-form" class="difficulty-form"><label><input type="checkbox" name="difficulty" value="易" /> 简单</label><label><input type="checkbox" name="difficulty" value="中" /> 中等</label><label><input type="checkbox" name="difficulty" value="难" /> 难</label><button type="submit">保存偏好</button></form>
           </div>
           <div class="setting-card">
-            <div><h3>复习间隔</h3><p>系统复习按整 List 安排。全部题目答对后依次间隔 1、2、4、7、15、30 天；有答错则整 List 次日复习。完整做完一个 List 才保存次数与错题，中途停止的未完成 List 不记。</p></div>
+            <div><h3>复习间隔</h3><p>常规 List 按 1、2、4、7、15、30 天推进，答错也照常推进，之后保持 30 天一次。系统错词另按逐词独立循环复习：答错回到 1 天，完成 30 天后的复习且两题全对才移出。常规和错词 List 可一起勾选，同词分别出题；完整做完每个 List 才存档。</p></div>
             <div class="interval-row"><span>1 天</span><span>2 天</span><span>4 天</span><span>7 天</span><span>15 天</span><span>30 天</span></div>
           </div>
           <div class="setting-card plan-card">
-            <div><h3>未来 7 天复习预览</h3><p>今天包含逾期词；实际每日安排仍以你设置的数量为准。</p></div>
+            <div><h3>未来 7 天复习预览</h3><p>包含常规及错词计划，今天包含逾期任务。同词在两套计划中到期时，分别计为两个复习词次。</p></div>
             <div class="plan-list" id="plan-list" aria-label="未来七天到期复习词数量"></div>
           </div>
           <div class="setting-card sync-card">

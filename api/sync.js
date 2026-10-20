@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
     const revision = body?.revision;
     const state = body?.state;
     if (!Number.isSafeInteger(revision) || revision < 0 || !validState(state) ||
-        Buffer.byteLength(JSON.stringify(state), "utf8") > 1500000) {
+        Buffer.byteLength(JSON.stringify(state), "utf8") > 4000000) {
       return send(res, 400, { error: "invalid_state" });
     }
     if (revision === 0) {
@@ -43,11 +43,16 @@ module.exports = async function handler(req, res) {
         throw error;
       }
     }
+    const stateVersion = Number.isSafeInteger(state.version) ? state.version : 0;
     const result = await docs.updateOne(
-      { _id: id, revision },
+      { _id: id, revision, $or: [{ "state.version": { $exists: false } }, { "state.version": { $lte: stateVersion } }] },
       { $set: { state, revision: revision + 1, updatedAt: new Date() } }
     );
-    if (!result.matchedCount) return send(res, 409, { error: "revision_conflict" });
+    if (!result.matchedCount) {
+      const current = await docs.findOne({ _id: id }, { projection: { "state.version": 1, _id: 0 } });
+      if ((current?.state?.version || 0) > stateVersion) return send(res, 409, { error: "client_update_required" });
+      return send(res, 409, { error: "revision_conflict" });
+    }
     return send(res, 200, { revision: revision + 1 });
   } catch (error) {
     console.error("Sync API error:", error);

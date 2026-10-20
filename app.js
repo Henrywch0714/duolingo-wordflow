@@ -63,13 +63,14 @@
 
   function defaultState() {
     return {
-      version: 4,
+      version: 5,
       dailyGoal: 20,
       deckOrder: [],
       preferredDifficulties: ["易", "中", "难"],
       orderSignature: "",
       progress: {},
       listReviews: {},
+      errorReviews: {},
       history: {},
       taskSessions: [],
       activeTask: null
@@ -160,6 +161,7 @@
     }
     if (input.history && typeof input.history === "object" && !Array.isArray(input.history)) base.history = input.history;
     if (input.listReviews && typeof input.listReviews === "object" && !Array.isArray(input.listReviews)) base.listReviews = input.listReviews;
+    if (input.errorReviews && typeof input.errorReviews === "object" && !Array.isArray(input.errorReviews)) base.errorReviews = input.errorReviews;
     if (Array.isArray(input.taskSessions)) base.taskSessions = input.taskSessions.filter((entry) =>
       entry && typeof entry === "object" && Array.isArray(entry.selectedWords) && Array.isArray(entry.completedWords) && Array.isArray(entry.listKeys));
     if (input.activeTask && typeof input.activeTask === "object" && Array.isArray(input.activeTask.selectedWords)) {
@@ -244,10 +246,11 @@
       const progress = ordered(Object.fromEntries(Object.entries(value.progress).map(([word, entry]) => [word, ordered(entry)])));
       const history = ordered(Object.fromEntries(Object.entries(value.history).map(([day, record]) => [day, {
         answers: ordered(record?.answers),
+        errorAnswers: ordered(record?.errorAnswers),
         newWords: (Array.isArray(record?.newWords) ? [...record.newWords] : []).sort()
-      }]).filter(([, record]) => Object.keys(record.answers).length || record.newWords.length)));
+      }]).filter(([, record]) => Object.keys(record.answers).length || Object.keys(record.errorAnswers).length || record.newWords.length)));
       return JSON.stringify({ dailyGoal: value.dailyGoal, preferences: [...value.preferredDifficulties].sort(), progress, history,
-        listReviews: ordered(value.listReviews), taskSessions: value.taskSessions, activeTask: value.activeTask });
+        listReviews: ordered(value.listReviews), errorReviews: ordered(value.errorReviews), taskSessions: value.taskSessions, activeTask: value.activeTask });
     };
     return canonical(local) === canonical(remote);
   }
@@ -329,7 +332,9 @@
       syncStatus(`已同步到云端 · 版本 ${syncRevision}`);
     } catch (error) {
       if (generation !== authGeneration) return;
-      if (error.status === 409) {
+      if (error.message === "client_update_required") {
+        syncStatus("网页版本较旧，请刷新页面后再同步；云端记录已保留。");
+      } else if (error.status === 409) {
         try {
           const record = await syncRequest("GET");
           if (generation !== authGeneration) return;
@@ -440,9 +445,14 @@
     toastTimer = setTimeout(() => toast.classList.remove("show"), 3500);
   }
 
-  function dueWords() {
-    return reviewLists.dueLists(state, activeCount, todayKey())
-      .flatMap((group) => group.words.map((word) => wordMap.get(word)));
+  function systemReviewGroups(date = todayKey()) {
+    const groups = [...reviewLists.dueLists(state, activeCount, date), ...reviewLists.dueErrorLists(state, date)];
+    return new Map(groups.map((group) => [group.key, group.words.map((word) => ({ ...wordMap.get(word),
+      reviewListKey: group.key, entryId: reviewLists.entryKey(group.key, word) }))]));
+  }
+
+  function dueWords(date = todayKey()) {
+    return [...systemReviewGroups(date).values()].flat();
   }
 
   function newWords() {
@@ -477,14 +487,18 @@
     const task = state.activeTask;
     if (!task) return;
     const completed = new Set(task.completedWords || []);
-    if (completed.size >= task.selectedWords.length) reason = "completed";
+    const independent = task.type === "system" && Array.isArray(task.selectedEntries) && Array.isArray(task.completedEntries);
+    const completedEntries = new Set(task.completedEntries || []);
+    if ((independent ? completedEntries.size : completed.size) >= task.selectedWords.length) reason = "completed";
     state.taskSessions.push({
       id: task.id, type: task.type, date: task.date, startedAt: task.startedAt,
       endedAt: new Date().toISOString(), reason,
       listKeys: task.listKeys, selectedWords: task.selectedWords,
-      completedWords: task.selectedWords.filter((word) => completed.has(word)),
-      ...(task.type === "system" && task.reviewPolicy === reviewLists.POLICY
-        ? { reviewPolicy: task.reviewPolicy, committedLists: task.committedLists || [] } : {})
+      completedWords: independent ? task.selectedEntries.filter((id) => completedEntries.has(id)).map(reviewLists.entryWord)
+        : task.selectedWords.filter((word) => completed.has(word)),
+      ...(task.type === "system" && Number.isInteger(task.reviewPolicy)
+        ? { reviewPolicy: task.reviewPolicy, committedLists: task.committedLists || [] } : {}),
+      ...(independent ? { selectedEntries: task.selectedEntries, completedEntries: [...completedEntries] } : {})
     });
     state.activeTask = null;
     void saveState();
@@ -504,6 +518,8 @@
       state.activeTask.reviewPolicy = reviewLists.POLICY;
       state.activeTask.committedLists = [];
       state.activeTask.listWords = Object.fromEntries([...taskGroups(items)].map(([key, entries]) => [key, entries.map((item) => item.word)]));
+      reviewLists.prepareTask(state, state.activeTask);
+      selectedReviewLists.clear();
     }
     void saveState();
     return true;
@@ -523,7 +539,7 @@
   function taskGroups(items) {
     const groups = new Map();
     for (const item of items) {
-      const key = listKey(item.word);
+      const key = item.reviewListKey || listKey(item.word);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(item);
     }
@@ -560,7 +576,18 @@
     else selectedReviewLists = selected;
     const refreshSelection = setupListSelection(`${kind}-select-all`, groups.keys(), selected, picker,
       () => { byId(buttonId).disabled = selected.size === 0; });
+    let previousSection = null;
     for (const [key, items] of groups) {
+      if (kind === "review") {
+        const section = reviewLists.isErrorKey(key) ? "错词复习" : "常规 List";
+        if (section !== previousSection) {
+          const heading = document.createElement("h3");
+          heading.className = "review-list-section";
+          heading.textContent = section;
+          picker.append(heading);
+          previousSection = section;
+        }
+      }
       const label = document.createElement("label");
       label.className = "task-list-row";
       const checkbox = document.createElement("input");
@@ -573,7 +600,9 @@
         refreshSelection();
       });
       const caption = document.createElement("span");
-      caption.innerHTML = `<strong>${listLabel(key)}</strong><small>${items.length} 个${kind === "study" ? "待学" : "待复习"}词${kind === "study" ? "" : ` · 系统复习 ${listReviewCount(key)} 次`}</small>`;
+      const info = kind === "study" ? `${items.length} 个待学词` : reviewLists.isErrorKey(key)
+        ? `${items.length} 个到期错词 · 逐词独立循环` : `${items.length} 个待复习词 · 系统复习 ${listReviewCount(key)} 次`;
+      caption.innerHTML = `<strong>${listLabel(key)}</strong><small>${info}</small>`;
       label.append(checkbox, caption);
       picker.append(label);
     }
@@ -619,7 +648,7 @@
     const counts = dates.map((date, index) => scheduled.reduce((sum, group) => {
       const entry = state.listReviews[group.key];
       return sum + ((index === 0 ? entry.dueDate <= today : entry.dueDate === date) ? group.words.length : 0);
-    }, 0));
+    }, 0) + Object.values(state.errorReviews).filter((entry) => index === 0 ? entry.dueDate <= today : entry.dueDate === date).length);
     const maximum = Math.max(...counts, 1);
     const list = byId("plan-list");
     list.replaceChildren();
@@ -660,7 +689,7 @@
     undoSnapshot = null;
     const needsReview = dueWords().length > 0;
     byId("system-review-callout").hidden = !needsReview || Boolean(task) || Boolean(manualWord);
-    if (needsReview) byId("system-review-count").textContent = `${dueWords().length} 个单词到期，可按 List 选择复习`;
+    if (needsReview) byId("system-review-count").textContent = `${dueWords().length} 词次到期，可按 List 选择复习`;
     byId("today-card-wrap").hidden = !currentWord;
     byId("today-empty").hidden = Boolean(currentWord) || Boolean(remaining.length);
     if (!currentWord) {
@@ -692,7 +721,7 @@
   async function recordLearning(item, answer, source) {
     const today = todayKey();
     const previous = state.progress[item.word] || null;
-    const stage = answer === "known" ? 0 : -1;
+    const stage = 0;
     state.progress[item.word] = {
       ...previous,
       wrongCount: Number(previous?.wrongCount) || 0,
@@ -1045,11 +1074,11 @@
 
   function startQuiz(mode, items, returnTab) {
     if (!items.length) { showToast("当前条件下没有可复习的单词"); return; }
-    const keys = [...new Set(items.map((item) => listKey(item.word)))];
+    const keys = [...new Set(items.map((item) => item.reviewListKey || listKey(item.word)))];
     if (mode === "system") {
-      const eligible = new Map(reviewLists.dueLists(state, activeCount, todayKey()).map((group) => [group.key, group.words]));
+      const eligible = systemReviewGroups();
       if (keys.some((key) => !eligible.has(key))) { showToast("所选 List 已不在到期计划中，请重新选择"); return; }
-      items = keys.flatMap((key) => eligible.get(key).map((word) => wordMap.get(word)));
+      items = keys.flatMap((key) => eligible.get(key));
     }
     if (!beginTask(mode, items, keys)) return;
     const quizWords = shuffleItems(items);
@@ -1063,8 +1092,8 @@
   function persistQuiz() {
     if (!quiz || !state.activeTask || state.activeTask.type === "study") return;
     state.activeTask.quiz = {
-      mode: quiz.mode, words: quiz.words.map((item) => item.word),
-      questions: quiz.questions.map(({ item, phase }) => ({ word: item.word, phase })),
+      mode: quiz.mode, words: quiz.words.map((item) => item.entryId || item.word),
+      questions: quiz.questions.map(({ item, phase }) => item.entryId ? { entry: item.entryId, phase } : { word: item.word, phase }),
       index: quiz.index, wrongByWord: [...quiz.wrongByWord], completedByWord: [...quiz.completedByWord],
       answeredQuestions: quiz.answeredQuestions, correctQuestions: quiz.correctQuestions,
       revealed: quiz.revealed, options: quiz.options, lastChoice: quiz.lastChoice, returnTab: quiz.returnTab
@@ -1074,15 +1103,20 @@
   }
 
   function restoreQuiz() {
-    if (state.activeTask?.type === "system" && state.activeTask.reviewPolicy !== reviewLists.POLICY) {
+    if (state.activeTask?.type === "system" && (state.activeTask.reviewPolicy !== reviewLists.POLICY || !Array.isArray(state.activeTask.selectedEntries))) {
       finishTask("ended");
       return true;
     }
     const saved = state.activeTask?.quiz;
     if (!saved || !Array.isArray(saved.questions)) return;
+    const hydrate = (id, independent) => {
+      const word = independent ? reviewLists.entryWord(id) : id;
+      const item = wordMap.get(word);
+      return item && (independent ? { ...item, entryId: id, reviewListKey: reviewLists.entryList(id) } : item);
+    };
     quiz = {
-      ...saved, words: saved.words.map((word) => wordMap.get(word)).filter(Boolean),
-      questions: saved.questions.map(({ word, phase }) => ({ item: wordMap.get(word), phase })).filter(({ item }) => item),
+      ...saved, words: saved.words.map((id) => hydrate(id, saved.mode === "system")).filter(Boolean),
+      questions: saved.questions.map(({ word, entry, phase }) => ({ item: hydrate(entry || word, Boolean(entry)), phase })).filter(({ item }) => item),
       wrongByWord: new Map(saved.wrongByWord || []), completedByWord: new Map(saved.completedByWord || []),
       busy: false
     };
@@ -1094,11 +1128,38 @@
     byId("exit-review").hidden = !active;
     if (active) return;
     byId("review-title").textContent = "系统复习";
-    const groups = taskGroups(dueWords());
+    const groups = systemReviewGroups();
     renderTaskPicker("review-list-picker", groups, selectedReviewLists, "start-review-task", "review");
+    const errorCount = [...groups.keys()].filter(reviewLists.isErrorKey).length;
     byId("review-task-summary").textContent = groups.size
-      ? `${groups.size} 个 List、${[...groups.values()].reduce((sum, items) => sum + items.length, 0)} 个到期词。每个 List 全部题目完成后，才保存次数、复习日期和错题。`
-      : "暂无到期 List。整 List 的新词学完后才会加入系统复习。";
+      ? `常规 ${groups.size - errorCount} 个 List、错词 ${errorCount} 个 List，共 ${dueWords().length} 词次。可一起勾选；重复词分别出题。每个 List 完整做完后才存档。`
+      : "暂无到期 List。常规计划与错词计划分别安排，逾期任务会保留。";
+    renderSystemErrorPlan();
+  }
+
+  function startSelectedSystemLists() {
+    const items = [...systemReviewGroups()].filter(([key]) => selectedReviewLists.has(key)).flatMap(([, entries]) => entries);
+    startQuiz("system", items, "review");
+  }
+
+  function renderSystemErrorPlan() {
+    const entries = Object.entries(state.errorReviews).sort(([a, ea], [b, eb]) => ea.dueDate.localeCompare(eb.dueDate) || a.localeCompare(b));
+    const details = byId("system-error-plan");
+    details.hidden = !entries.length;
+    byId("system-error-plan-title").textContent = `查看全部错词计划（${entries.length} 词）`;
+    const list = byId("system-error-plan-list");
+    list.replaceChildren();
+    if (!details.open) return;
+    for (const [word, entry] of entries) {
+      const row = document.createElement("div");
+      row.className = "error-plan-row";
+      const name = document.createElement("strong");
+      name.textContent = `${word} · ${wordMap.get(word)?.gloss || ""}`;
+      const plan = document.createElement("small");
+      plan.textContent = `下次 ${entry.dueDate} · 待完成 ${INTERVALS[entry.stage]} 天间隔复习 · 累计错 ${state.progress[word]?.wrongCount || 0} 次`;
+      row.append(name, plan);
+      list.append(row);
+    }
   }
 
   function makeOptions(item, phase) {
@@ -1123,7 +1184,7 @@
       if (quiz && state.activeTask && quiz.index >= quiz.questions.length) finishTask("completed");
       byId("review-empty-title").textContent = quiz ? "本轮复习完成" : "暂无进行中的复习";
       byId("review-empty-text").textContent = quiz
-        ? `共完成 ${quiz.words.length} 个词、${quiz.answeredQuestions} 道题，答对 ${quiz.correctQuestions} 道。`
+        ? `共完成 ${quiz.words.length} ${quiz.mode === "system" ? "词次" : "个词"}、${quiz.answeredQuestions} 道题，答对 ${quiz.correctQuestions} 道。`
         : "可以从今日单词、自由复习或错题本开始。";
       byId("review-progress-text").textContent = quiz ? "100% 完成" : "尚未开始";
       byId("review-progress-fill").style.width = quiz ? "100%" : "0%";
@@ -1135,7 +1196,9 @@
     byId("review-progress-fill").style.width = `${Math.round(quiz.answeredQuestions / quiz.questions.length * 100)}%`;
     byId("quiz-direction").textContent = question.phase === 0 ? "英译中 · 选出中文释义" : "中译英 · 选出英文单词";
     const location = wordLocation(question.item.word);
-    byId("quiz-location").textContent = `${location.other ? "OTHER" : `UNIT ${String(location.unit).padStart(2, "0")}`} · LIST ${String(location.list).padStart(2, "0")}`;
+    byId("quiz-location").textContent = question.item.reviewListKey
+      ? `${reviewLists.isErrorKey(question.item.reviewListKey) ? "错词循环" : "常规复习"} · ${listLabel(question.item.reviewListKey)}`
+      : `${location.other ? "OTHER" : `UNIT ${String(location.unit).padStart(2, "0")}`} · LIST ${String(location.list).padStart(2, "0")}`;
     byId("quiz-prompt").textContent = question.phase === 0 ? question.item.word : question.item.gloss;
     if (!quiz.options) quiz.options = makeOptions(question.item, question.phase);
     const options = byId("quiz-options");
@@ -1199,9 +1262,10 @@
     quiz.lastChoice = choice;
     quiz.answeredQuestions++;
     if (right) quiz.correctQuestions++;
-    else quiz.wrongByWord.set(item.word, (quiz.wrongByWord.get(item.word) || 0) + 1);
-    const completed = (quiz.completedByWord.get(item.word) || 0) + 1;
-    quiz.completedByWord.set(item.word, completed);
+    const answerKey = item.entryId || item.word;
+    if (!right) quiz.wrongByWord.set(answerKey, (quiz.wrongByWord.get(answerKey) || 0) + 1);
+    const completed = (quiz.completedByWord.get(answerKey) || 0) + 1;
+    quiz.completedByWord.set(answerKey, completed);
     byId("quiz-options").querySelectorAll("button").forEach((button) => {
       button.disabled = true;
       if (button.textContent === correct) button.classList.add("correct");
@@ -1215,10 +1279,13 @@
     try {
       if (completed === 2) {
         if (quiz.mode === "system") {
-          const key = listKey(item.word);
-          const result = reviewLists.commitList(state, state.activeTask, quiz.completedByWord, quiz.wrongByWord, key, todayKey(), INTERVALS);
+          const key = item.reviewListKey;
+          const complete = reviewLists.resultsForList(state.activeTask, quiz.completedByWord, key);
+          const wrong = reviewLists.resultsForList(state.activeTask, quiz.wrongByWord, key);
+          const commit = reviewLists.isErrorKey(key) ? reviewLists.commitErrorList : reviewLists.commitList;
+          const result = commit(state, state.activeTask, complete, wrong, key, todayKey(), INTERVALS);
           if (result) {
-            byId("quiz-result-title").textContent += ` · ${listLabel(key)} 已存档`;
+            byId("quiz-result-title").textContent += ` · ${listLabel(key)} 已存档${result.removed ? `，${result.removed} 词完成错词循环` : ""}`;
             renderOverview();
             renderMistakes();
             renderFreeLists();
@@ -1261,6 +1328,7 @@
 
   function listLabel(key) {
     const parts = key.split(":");
+    if (parts[0] === "error") return `错词 List ${parts[1]}`;
     return parts[0] === "other" ? `Other · List ${parts[1]}` : `Unit ${parts[1]} · List ${parts[2]}`;
   }
 
@@ -1279,7 +1347,7 @@
     const newWords = Array.isArray(record.newWords) ? record.newWords : [];
     const reviewed = sessions.filter((task) => task.type !== "study").flatMap((task) => task.completedWords || []);
     const legacyReviews = Object.entries(record.answers || {}).filter(([, answer]) => String(answer).startsWith("review-")).map(([word]) => word);
-    const studied = [...new Set([...newWords, ...reviewed, ...legacyReviews])];
+    const studied = [...new Set([...newWords, ...reviewed, ...legacyReviews, ...Object.keys(record.errorAnswers || {})])];
     let planned = Array.isArray(record.newPlanLists) ? record.newPlanLists : [];
     if (date > today && !planned.length) {
       const openLists = [...new Set(state.deckOrder.slice(0, activeCount).filter((word) => !state.progress[word]).map(listKey))];
@@ -1289,7 +1357,7 @@
     }
     const backlog = date === today ? dueWords().length : date < today
       ? (Number.isInteger(record.reviewBacklog) ? record.reviewBacklog : null)
-      : reviewLists.dueLists(state, activeCount, date).reduce((sum, group) => sum + group.words.length, 0);
+      : dueWords(date).length;
     return { planned, backlog, studied, newWords, sessions, forecast: date > today };
   }
 
@@ -1312,13 +1380,13 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = `calendar-day${date === todayKey() ? " today" : ""}${date === calendarDay ? " selected" : ""}`;
-      button.setAttribute("aria-label", `${date}：计划 ${info.planned.length} 个 List，复习积压 ${info.backlog ?? "无历史记录"} 词，已背 ${info.studied.length} 词`);
+      button.setAttribute("aria-label", `${date}：计划 ${info.planned.length} 个 List，复习积压 ${info.backlog ?? "无历史记录"} 词次，已背 ${info.studied.length} 词`);
       const numeral = document.createElement("strong");
       numeral.textContent = String(number);
       const plan = document.createElement("small");
       plan.textContent = `新 ${info.planned.length} 列`;
       const due = document.createElement("small");
-      due.textContent = `复 ${info.backlog ?? "—"} 词`;
+      due.textContent = `复 ${info.backlog ?? "—"} 词次`;
       const studied = document.createElement("small");
       studied.textContent = `背 ${info.studied.length} 词`;
       button.append(numeral, plan, due, studied);
@@ -1331,22 +1399,25 @@
     const title = document.createElement("h3");
     title.textContent = `${calendarDay} ${info.forecast ? "· 预计" : "· 学习记录"}`;
     const summary = document.createElement("p");
-    summary.textContent = `新词计划：${info.planned.length ? info.planned.map(listLabel).join("、") : "无记录"}。复习积压：${info.backlog === null ? "暂无历史快照" : `${info.backlog} 词`}。新词已背：${info.newWords.length} 词。`;
+    summary.textContent = `新词计划：${info.planned.length ? info.planned.map(listLabel).join("、") : "无记录"}。复习积压：${info.backlog === null ? "暂无历史快照" : `${info.backlog} 词次`}。新词已背：${info.newWords.length} 词。`;
     detail.append(title, summary);
     for (const task of info.sessions) {
-      const completed = new Set(task.completedWords || []);
-      const missed = (task.selectedWords || []).filter((word) => !completed.has(word));
+      const independent = Array.isArray(task.selectedEntries);
+      const completed = new Set((independent ? task.completedEntries : task.completedWords) || []);
+      const selected = independent ? task.selectedEntries : task.selectedWords || [];
+      const missed = selected.filter((id) => !completed.has(id));
       const row = document.createElement("div");
       row.className = "calendar-session";
       const label = document.createElement("strong");
       label.textContent = `${({ study: "新词", system: "系统复习", free: "自由复习", mistake: "错题复习" })[task.type] || "任务"} · ${(task.listKeys || []).map(listLabel).join("、")}`;
       const status = document.createElement("span");
-      status.textContent = `完成 ${completed.size}/${(task.selectedWords || []).length} 词 · 未完成 ${missed.length} 词 · ${({ completed: "已完成", timed_out: "60 分钟无操作结束", ended: "手动结束", active: "进行中" })[task.reason] || "已结束"}`;
-      if (task.type === "system" && task.reviewPolicy === reviewLists.POLICY) status.textContent += ` · 已存档 ${(task.committedLists || []).length}/${task.listKeys.length} List；未完成 List 未记次／错题`;
+      const unit = independent ? "词次" : "词";
+      status.textContent = `完成 ${completed.size}/${selected.length} ${unit} · 未完成 ${missed.length} ${unit} · ${({ completed: "已完成", timed_out: "60 分钟无操作结束", ended: "手动结束", active: "进行中" })[task.reason] || "已结束"}`;
+      if (task.type === "system" && task.reviewPolicy >= 1) status.textContent += ` · 已存档 ${(task.committedLists || []).length}/${task.listKeys.length} List；未完成 List 未记次／错题`;
       row.append(label, status);
       if (missed.length) {
         const missedText = document.createElement("small");
-        missedText.textContent = `本次未学／未复习：${missed.join("、")}`;
+        missedText.textContent = `本次未学／未复习：${missed.map((id) => independent ? `${listLabel(reviewLists.entryList(id))}：${reviewLists.entryWord(id)}` : id).join("、")}`;
         row.append(missedText);
       }
       detail.append(row);
@@ -1611,10 +1682,8 @@
       finishTask("ended");
       renderToday();
     });
-    byId("start-review-task").addEventListener("click", () => {
-      const items = dueWords().filter((item) => selectedReviewLists.has(listKey(item.word)));
-      startQuiz("system", items, "review");
-    });
+    byId("start-review-task").addEventListener("click", startSelectedSystemLists);
+    byId("system-error-plan").addEventListener("toggle", renderSystemErrorPlan);
     byId("calendar-prev").addEventListener("click", () => {
       const [year, month] = calendarMonth.split("-").map(Number);
       const date = new Date(year, month - 2, 1);

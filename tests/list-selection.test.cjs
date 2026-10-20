@@ -40,6 +40,9 @@ function harness() {
         ensureDeckOrder();
       },
       renderTaskPicker, renderFreeLists, setFreeListScope, freeListGroups, startSelectedFreeLists,
+      renderReviewPicker, startSelectedSystemLists, calendarInfo,
+      seedErrors(entries) { state.errorReviews = entries; reviewLists.ensureRecords(state, activeCount, addDays(todayKey(), 1)); },
+      today: todayKey,
       getState: () => state,
       selections: kind => [...(kind === "study" ? selectedStudyLists : kind === "review" ? selectedReviewLists : selectedFreeLists)],
       progressSnapshot: () => JSON.stringify({progress: state.progress, listReviews: state.listReviews}),
@@ -140,4 +143,27 @@ test("empty study and system pickers disable select-all and start buttons", () =
     assert.equal(get(`${kind}-select-all`).disabled, true);
     assert.equal(get(buttonId).disabled, true);
   }
+});
+
+test("normal and error Lists share selection controls and distinguish duplicate words", () => {
+  const { app, get } = harness();
+  app.seedErrors(Object.fromEntries(["word0", "word30"].map((word) => [word, {
+    cycleId: `cycle:${word}`, stage: 0, dueDate: "2020-01-01", createdDate: "2019-01-01", lastDate: null, reviewCount: 0, revision: 0
+  }])));
+  app.renderReviewPicker();
+  const picker = get("review-list-picker");
+  assert.deepEqual(picker.children.filter((child) => child.tagName === "h3").map((child) => child.textContent), ["常规 List", "错词复习"]);
+  assert.deepEqual(picker.querySelectorAll().map((input) => input.value), ["unit:1:1", "error:1"]);
+  assert.equal(get("system-error-plan").hidden, false);
+  get("system-error-plan").open = true;
+  app.renderReviewPicker();
+  assert.equal(get("system-error-plan-list").children.length, 2);
+  assert.equal(app.calendarInfo(app.today()).backlog, 12);
+  const all = get("review-select-all");
+  all.checked = true; all.onchange();
+  app.startSelectedSystemLists();
+  const task = app.getState().activeTask;
+  assert.equal(task.selectedEntries.length, 12);
+  assert.equal(task.selectedWords.filter((word) => word === "word0").length, 2);
+  assert.equal(task.quiz.questions.length, 24);
 });

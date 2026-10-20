@@ -49,7 +49,10 @@ test("whole List commits once and shares the next date; wrong counts stay per wo
   const wrong = new Map([["word0", 2], ["word1", 1]]);
   const result = lists.commitList(state, task, complete, wrong, "unit:1:1", "2026-10-12", intervals);
   assert.equal(result.count, 4);
-  assert.equal(result.dueDate, "2026-10-13");
+  assert.equal(result.dueDate, "2026-10-27");
+  assert.equal(state.errorReviews.word0.dueDate, "2026-10-13");
+  assert.equal(state.errorReviews.word1.dueDate, "2026-10-13");
+  assert.equal(state.errorReviews.word2, undefined);
   assert.equal(state.progress.word0.wrongCount, 3);
   assert.equal(state.progress.word1.wrongCount, 2);
   assert.equal(state.progress.word2.wrongCount, 1);
@@ -70,7 +73,7 @@ test("completed List survives while an unfinished second List changes nothing", 
   assert.deepEqual(task.committedLists, ["unit:1:1"]);
   assert.equal(task.completedWords.length, 10);
   assert.equal(JSON.stringify(groups[1].words.map((word) => state.progress[word])), secondBefore);
-  assert.equal(state.listReviews["unit:1:1"].dueDate, "2026-10-16");
+  assert.equal(state.listReviews["unit:1:1"].dueDate, "2026-10-27");
   assert.deepEqual(lists.dueLists(state, 20, "2026-10-12").map((group) => group.key), ["unit:1:2"]);
 });
 
